@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "ReadFlow PDF - 顺流阅读助手",
+  "version": "1.1.0",
+  "description": "沉浸式 PDF 阅读与划词收集工具，支持 Alt 快捷键、高亮持久化、轻量释义气泡及 Anki 导出。",
+  "permissions": [
+    "tabs",
+    "storage"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "ReadFlow PDF"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "pdfjs-viewer/web/*",
+        "pdfjs-viewer/web/**/*",
+        "pdfjs-viewer/build/*",
+        "pdfjs-viewer/build/**/*"
+      ],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}

@@ -1,0 +1,1768 @@
+// extension_glue.js
+
+// --- Global State ---
+let vocabList = [];
+let settings = {
+  modifierKey: 'Alt',
+  targetLang: 'zh-CN',
+  translationProvider: 'google',
+  geminiApiKey: '',
+  geminiModel: 'gemini-1.5-flash',
+  dockPosition: 'right', // 'right', 'left', 'bottom'
+  sidebarWidth: 380,     // width for left/right docking
+  sidebarHeight: 300,    // height for bottom docking
+  sidebarOpen: false,    // persistence of open state
+  cardDetailMode: 'contextual', // 'minimal', 'contextual', 'full'
+  toggleShortcutModifier: 'Alt',
+  toggleShortcutKey: 'b',
+  alwaysTranslate: false,
+  theme: 'light' // 'light', 'dark-ui', 'dark-all'
+};
+let toastTimeout = null;
+
+// Target language code mapping for human display
+const LANG_NAMES = {
+  'zh-CN': 'Chinese (Simplified)',
+  'zh-TW': 'Chinese (Traditional)',
+  'en': 'English',
+  'es': 'Spanish',
+  'ja': 'Japanese',
+  'fr': 'French',
+  'de': 'German'
+};
+
+// Elements that will be created dynamically
+let sidebar = null;
+let vocabListContainer = null;
+let sidebarBadge = null;
+let searchInput = null;
+let selectScope = null;
+let selectSort = null;
+let setModifier = null;
+let setLang = null;
+let setProvider = null;
+let setAiKey = null;
+let setAiModel = null;
+let aiSettingsGroup = null;
+let setCardMode = null;
+let setTheme = null;
+let setAlwaysTranslate = null;
+let setToggleShortcutModifier = null;
+let setToggleShortcutKey = null;
+
+// --- Initialize when DOM is loaded ---
+document.addEventListener('DOMContentLoaded', async () => {
+  // 1. Load settings & vocabulary database
+  await loadExtensionData();
+
+  // 2. Build and inject Sidebar DOM
+  injectSidebarDOM();
+
+  // 3. Inject Toggle Button to PDF.js Toolbar
+  injectToolbarButton();
+
+  // 4. Setup Event Listeners
+  setupExtensionEventListeners();
+
+  // 5. Initialize Drag Resizer
+  initResizer();
+
+  // Apply theme on load
+  applyTheme();
+
+  // Initialize welcome overlay if needed
+  initWelcomeOverlay();
+
+  // 6. Polling listener to bind to PDF.js native EventBus when initialized
+  const checkInterval = setInterval(() => {
+    if (window.PDFViewerApplication && window.PDFViewerApplication.eventBus) {
+      clearInterval(checkInterval);
+      
+      // Hook native resize/sidebar toggle changes to update our layouts
+      window.PDFViewerApplication.eventBus.on('resize', () => {
+        updateLayout();
+      });
+      window.PDFViewerApplication.eventBus.on('sidebarviewchanged', () => {
+        setTimeout(updateLayout, 50);
+      });
+      window.PDFViewerApplication.eventBus.on('pagesinit', () => {
+        hideWelcomeOverlay();
+      });
+      
+      // Initial Layout Update
+      updateLayout();
+    }
+  }, 100);
+});
+
+// --- Data Loading & Storage ---
+async function loadExtensionData() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(['vocabList', 'settings'], (result) => {
+      if (result.vocabList) {
+        vocabList = result.vocabList;
+      }
+      if (result.settings) {
+        settings = { ...settings, ...result.settings };
+      }
+      resolve();
+    });
+  });
+}
+
+function updateBadgeCount() {
+  if (!sidebarBadge) return;
+  let list = vocabList;
+  if (selectScope && selectScope.value === 'current') {
+    const currentPdf = getCurrentPdfName();
+    list = vocabList.filter(item => item.source_pdf === currentPdf);
+  }
+  sidebarBadge.textContent = list.length;
+}
+
+// --- DOM Injections ---
+function injectSidebarDOM() {
+  const outerContainer = document.getElementById('outerContainer');
+  if (!outerContainer) return;
+
+  sidebar = document.createElement('aside');
+  sidebar.id = 'sidebar';
+  
+  sidebar.innerHTML = `
+    <!-- Resizer Divider Handle -->
+    <div id="sidebar-resizer" class="sidebar-resizer"></div>
+
+    <div class="sidebar-header">
+      <div class="sidebar-tabs">
+        <button id="tab-vocab" class="tab-btn active" aria-label="词汇列表">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="pointer-events: none;">
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+          </svg>
+          <span>词汇列表</span>
+        </button>
+        <button id="tab-settings" class="tab-btn" aria-label="参数设置">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="pointer-events: none;">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+          <span>参数设置</span>
+        </button>
+      </div>
+      
+      <!-- Docking Controls -->
+      <div class="sidebar-dock-controls" style="display: flex; gap: 4px; margin-left: auto; margin-right: 10px; align-items: center;">
+        <button id="btn-dock-left" class="dock-btn" title="靠左停靠" aria-label="靠左停靠">
+          <svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><rect x="1" y="1" width="4" height="14" rx="0.5" fill="currentColor" opacity="0.9"/><rect x="6" y="1" width="9" height="14" rx="0.5" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>
+        </button>
+        <button id="btn-dock-bottom" class="dock-btn" title="靠下停靠" aria-label="靠下停靠">
+          <svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><rect x="1" y="11" width="14" height="4" rx="0.5" fill="currentColor" opacity="0.9"/><rect x="1" y="1" width="14" height="9" rx="0.5" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>
+        </button>
+        <button id="btn-dock-right" class="dock-btn" title="靠右停靠" aria-label="靠右停靠">
+          <svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><rect x="11" y="1" width="4" height="14" rx="0.5" fill="currentColor" opacity="0.9"/><rect x="1" y="1" width="9" height="14" rx="0.5" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>
+        </button>
+      </div>
+
+      <button id="btn-close-sidebar" class="close-btn" title="关闭侧边栏" aria-label="关闭侧边栏">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="pointer-events: none;">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      </button>
+    </div>
+
+    <!-- Tab Content: Vocab List -->
+    <div id="sidebar-vocab-pane" class="tab-pane active">
+      <div class="pane-actions">
+        <div class="search-input-wrapper">
+          <span class="search-icon">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="11" cy="11" r="8"></circle>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+          </span>
+          <input type="text" id="search-input" placeholder="搜索已收集的词汇..." class="search-input">
+        </div>
+        <div class="filter-row">
+          <select id="select-scope" class="filter-select" aria-label="搜索范围">
+            <option value="current">当前 PDF</option>
+            <option value="all">所有 PDF</option>
+          </select>
+          <select id="select-sort" class="filter-select" aria-label="排序方式">
+            <option value="time-desc">最新添加</option>
+            <option value="time-asc">最早添加</option>
+            <option value="lookups-desc">查询次数 ⬇</option>
+            <option value="alpha">字母 A-Z</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="vocab-list-container" class="vocab-list-container">
+        <div class="empty-state">
+          <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity: 0.4;">
+            <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path>
+            <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>
+          </svg>
+          <p>暂无收集词汇</p>
+        </div>
+      </div>
+
+      <div class="sidebar-footer">
+        <button id="btn-export-csv" class="footer-btn">导出 CSV</button>
+        <button id="btn-export-anki" class="footer-btn primary-btn">导出 Anki (TSV)</button>
+      </div>
+    </div>
+
+    <!-- Tab Content: Settings -->
+    <div id="sidebar-settings-pane" class="tab-pane">
+      <div class="settings-group">
+        <h3>取词与快捷键</h3>
+        <div class="setting-row">
+          <label for="setting-modifier">快捷修饰键</label>
+          <select id="setting-modifier" class="setting-select">
+            <option value="Alt">Alt 键 (推荐)</option>
+            <option value="Ctrl">Ctrl 键</option>
+            <option value="Shift">Shift 键</option>
+            <option value="None">无 (直接选词)</option>
+          </select>
+        </div>
+        <div class="setting-row" style="margin-top: 10px;">
+          <label for="setting-always-translate">无修饰键直接选词</label>
+          <input type="checkbox" id="setting-always-translate" class="setting-checkbox" style="width: auto; cursor: pointer;">
+        </div>
+        <div class="setting-row" style="margin-top: 10px;">
+          <label for="setting-toggle-shortcut-modifier">快捷键切换直接选词</label>
+          <div style="display: flex; gap: 6px; align-items: center;">
+            <select id="setting-toggle-shortcut-modifier" class="setting-select" style="min-width: 60px; max-width: 80px; padding: 4px;">
+              <option value="Alt">Alt</option>
+              <option value="Ctrl">Ctrl</option>
+              <option value="Shift">Shift</option>
+              <option value="None">无</option>
+            </select>
+            <span style="font-size: 11px; color: var(--text-muted);">+</span>
+            <input type="text" id="setting-toggle-shortcut-key" class="setting-input-text" style="width: 55px; text-align: center; cursor: pointer; text-transform: uppercase; padding: 4px;" readonly placeholder="按键...">
+          </div>
+        </div>
+        <p class="setting-help">按住修饰键并双击单词或划选文本将触发收集。您也可以使用设定的快捷键一键开启/关闭“无需修饰键直接选词”。</p>
+      </div>
+
+      <div class="settings-group">
+        <h3>翻译设置</h3>
+        <div class="setting-row">
+          <label for="setting-lang">目标翻译语言</label>
+          <select id="setting-lang" class="setting-select">
+            <option value="zh-CN">中文 (简体)</option>
+            <option value="zh-TW">中文 (繁体)</option>
+            <option value="en">English (Definitions)</option>
+            <option value="es">Español</option>
+            <option value="ja">日本語</option>
+            <option value="fr">Français</option>
+            <option value="de">Deutsch</option>
+          </select>
+        </div>
+        <div class="setting-row">
+          <label for="setting-provider">翻译服务商</label>
+          <select id="setting-provider" class="setting-select">
+            <option value="google">Google 翻译 (内置)</option>
+            <option value="dictionary">英汉/英英词典 (仅英文)</option>
+            <option value="gemini">Gemini AI (上下文翻译)</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="ai-settings-group" class="settings-group" style="display: none;">
+        <h3>AI 智能配置</h3>
+        <div class="setting-row column">
+          <label for="setting-ai-key">Gemini API Key</label>
+          <input type="password" id="setting-ai-key" placeholder="输入 API 密钥..." class="setting-input-text">
+        </div>
+        <div class="setting-row">
+          <label for="setting-ai-model">AI 模型</label>
+          <select id="setting-ai-model" class="setting-select">
+            <option value="gemini-1.5-flash">Gemini 1.5 Flash (推荐)</option>
+            <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
+          </select>
+        </div>
+        <p class="setting-help">使用 Gemini AI 翻译时，AI 将自动结合生词的上下文，在专业语境下输出极其精准的专业释义。</p>
+      </div>
+
+      <div class="settings-group">
+        <h3>显示与主题</h3>
+        <div class="setting-row">
+          <label for="setting-theme">界面主题</label>
+          <select id="setting-theme" class="setting-select">
+            <option value="light">明亮纸张</option>
+            <option value="dark-ui">暗黑界面 (白纸)</option>
+            <option value="dark-all">暗黑护眼 (黑纸)</option>
+          </select>
+        </div>
+        <div class="setting-row" style="margin-top: 10px;">
+          <label for="setting-card-mode">卡片展示模式</label>
+          <select id="setting-card-mode" class="setting-select">
+            <option value="minimal">极简模式 (仅释义)</option>
+            <option value="contextual">上下文模式 (释义+例句)</option>
+            <option value="full">完整模式 (展示来源及详情)</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="settings-group">
+        <h3>存储与同步</h3>
+        <div class="setting-row">
+          <button id="btn-clear-db" class="btn-danger">清空所有本地生词库</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  outerContainer.appendChild(sidebar);
+
+  // Link JS variables
+  vocabListContainer = document.getElementById('vocab-list-container');
+  searchInput = document.getElementById('search-input');
+  selectScope = document.getElementById('select-scope');
+  selectSort = document.getElementById('select-sort');
+  setModifier = document.getElementById('setting-modifier');
+  setLang = document.getElementById('setting-lang');
+  setProvider = document.getElementById('setting-provider');
+  setAiKey = document.getElementById('setting-ai-key');
+  setAiModel = document.getElementById('setting-ai-model');
+  aiSettingsGroup = document.getElementById('ai-settings-group');
+  setCardMode = document.getElementById('setting-card-mode');
+  setTheme = document.getElementById('setting-theme');
+  setAlwaysTranslate = document.getElementById('setting-always-translate');
+  setToggleShortcutModifier = document.getElementById('setting-toggle-shortcut-modifier');
+  setToggleShortcutKey = document.getElementById('setting-toggle-shortcut-key');
+
+  // Sync settings pane options
+  setModifier.value = settings.modifierKey;
+  setLang.value = settings.targetLang;
+  setProvider.value = settings.translationProvider;
+  setAiKey.value = settings.geminiApiKey || '';
+  setAiModel.value = settings.geminiModel || 'gemini-1.5-flash';
+  setCardMode.value = settings.cardDetailMode || 'contextual';
+  setTheme.value = settings.theme || 'light';
+  setAlwaysTranslate.checked = settings.alwaysTranslate || false;
+  setToggleShortcutModifier.value = settings.toggleShortcutModifier || 'Alt';
+  setToggleShortcutKey.value = (settings.toggleShortcutKey || 'b').toUpperCase();
+  toggleAiSettingsVisibility();
+}
+
+function injectToolbarButton() {
+  const outerContainer = document.getElementById('outerContainer');
+  if (!outerContainer) return;
+
+  const btn = document.createElement('button');
+  btn.id = 'btn-toggle-sidebar';
+  btn.className = 'floating-fab-btn';
+  btn.title = '打开生词本';
+  
+  btn.innerHTML = `
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="pointer-events: none;">
+      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+    </svg>
+    <span id="sidebar-badge" class="badge">0</span>
+  `;
+
+  // Append directly to the outer container for floating display
+  outerContainer.appendChild(btn);
+  sidebarBadge = document.getElementById('sidebar-badge');
+  updateBadgeCount();
+}
+
+// --- Setup Event Listeners ---
+function setupExtensionEventListeners() {
+  // Sidebar show/hide triggers
+  const btnToggle = document.getElementById('btn-toggle-sidebar');
+  const btnClose = document.getElementById('btn-close-sidebar');
+  if (btnToggle) btnToggle.addEventListener('click', toggleSidebar);
+  if (btnClose) btnClose.addEventListener('click', toggleSidebar);
+
+  // Docking controls
+  const btnDockLeft = document.getElementById('btn-dock-left');
+  const btnDockBottom = document.getElementById('btn-dock-bottom');
+  const btnDockRight = document.getElementById('btn-dock-right');
+  if (btnDockLeft) btnDockLeft.addEventListener('click', () => changeDockPosition('left'));
+  if (btnDockBottom) btnDockBottom.addEventListener('click', () => changeDockPosition('bottom'));
+  if (btnDockRight) btnDockRight.addEventListener('click', () => changeDockPosition('right'));
+
+  // Tab switching
+  const tabVocab = document.getElementById('tab-vocab');
+  const tabSettings = document.getElementById('tab-settings');
+  if (tabVocab) tabVocab.addEventListener('click', () => switchTab('vocab'));
+  if (tabSettings) tabSettings.addEventListener('click', () => switchTab('settings'));
+
+  // Search & sorting
+  if (searchInput) searchInput.addEventListener('input', renderSidebarVocabList);
+  if (selectScope) selectScope.addEventListener('change', () => {
+    renderSidebarVocabList();
+    updateBadgeCount();
+  });
+  if (selectSort) selectSort.addEventListener('change', renderSidebarVocabList);
+
+  // Settings
+  if (setModifier) setModifier.addEventListener('change', updateSettingField);
+  if (setLang) setLang.addEventListener('change', updateSettingField);
+  if (setProvider) setProvider.addEventListener('change', () => {
+    updateSettingField();
+    toggleAiSettingsVisibility();
+  });
+  if (setAiKey) setAiKey.addEventListener('change', updateSettingField);
+  if (setAiModel) setAiModel.addEventListener('change', updateSettingField);
+  if (setCardMode) setCardMode.addEventListener('change', () => {
+    updateSettingField();
+    renderSidebarVocabList();
+  });
+  if (setTheme) setTheme.addEventListener('change', updateSettingField);
+  if (setAlwaysTranslate) setAlwaysTranslate.addEventListener('change', updateSettingField);
+  if (setToggleShortcutModifier) setToggleShortcutModifier.addEventListener('change', updateSettingField);
+  if (setToggleShortcutKey) {
+    setToggleShortcutKey.addEventListener('keydown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (['alt', 'control', 'shift', 'meta', 'escape', 'tab'].includes(e.key.toLowerCase())) return;
+      setToggleShortcutKey.value = e.key.toUpperCase();
+      settings.toggleShortcutKey = e.key;
+      updateSettingField();
+    });
+  }
+  
+  const btnClear = document.getElementById('btn-clear-db');
+  if (btnClear) btnClear.addEventListener('click', clearEntireDatabase);
+
+  // Exporters
+  const btnCsv = document.getElementById('btn-export-csv');
+  const btnAnki = document.getElementById('btn-export-anki');
+  if (btnCsv) btnCsv.addEventListener('click', exportVocabCsv);
+  if (btnAnki) btnAnki.addEventListener('click', exportVocabAnki);
+
+  // Selection events hook inside PDF pages
+  const viewerContainer = document.getElementById('viewerContainer');
+  if (viewerContainer) {
+    viewerContainer.addEventListener('mouseup', handleTextSelection);
+  }
+
+  // Global Keydown Shortcut Listener
+  window.addEventListener('keydown', (e) => {
+    if (e.target.tagName.toUpperCase() === 'INPUT' || e.target.tagName.toUpperCase() === 'TEXTAREA') {
+      return;
+    }
+    const targetModifier = settings.toggleShortcutModifier || 'Alt';
+    const targetKey = (settings.toggleShortcutKey || 'b').toLowerCase();
+    
+    let modifierMatch = false;
+    if (targetModifier === 'Alt' && e.altKey && !e.ctrlKey && !e.shiftKey) modifierMatch = true;
+    else if (targetModifier === 'Ctrl' && e.ctrlKey && !e.altKey && !e.shiftKey) modifierMatch = true;
+    else if (targetModifier === 'Shift' && e.shiftKey && !e.altKey && !e.ctrlKey) modifierMatch = true;
+    else if (targetModifier === 'None' && !e.altKey && !e.ctrlKey && !e.shiftKey) modifierMatch = true;
+    
+    if (modifierMatch && e.key.toLowerCase() === targetKey) {
+      e.preventDefault();
+      settings.alwaysTranslate = !settings.alwaysTranslate;
+      chrome.storage.local.set({ settings });
+      if (setAlwaysTranslate) {
+        setAlwaysTranslate.checked = settings.alwaysTranslate;
+      }
+      showSystemToast(settings.alwaysTranslate ? '已开启无修饰键直接选词翻译' : '已关闭无修饰键选词（恢复快捷键取词）');
+    }
+  });
+
+  // Hook into PDF.js native page rendering completion event
+  document.addEventListener('pagerendered', (e) => {
+    const pageNum = e.detail.pageNumber;
+    const pageDiv = e.target; // page DOM container (.page)
+    const textLayerDiv = pageDiv.querySelector('.textLayer');
+    if (textLayerDiv) {
+      applyPageHighlights(pageNum, textLayerDiv);
+    }
+  });
+}
+
+function toggleSidebar() {
+  settings.sidebarOpen = !settings.sidebarOpen;
+  chrome.storage.local.set({ settings });
+  updateLayout();
+}
+
+function changeDockPosition(position) {
+  settings.dockPosition = position;
+  chrome.storage.local.set({ settings });
+  
+  // Re-adjust resizer class on sidebar
+  const resizer = document.getElementById('sidebar-resizer');
+  if (resizer) {
+    resizer.className = 'sidebar-resizer';
+  }
+
+  updateLayout();
+  renderSidebarVocabList(); // Re-render to trigger layout changes (e.g. grid in dock-bottom)
+}
+
+function updateLayout() {
+  const outer = document.getElementById('outerContainer');
+  const main = document.getElementById('mainContainer');
+  const sb = document.getElementById('sidebar');
+  if (!outer || !main || !sb) return;
+
+  const isOpen = settings.sidebarOpen;
+  const dock = settings.dockPosition || 'right';
+
+  // Toggle CSS classes on outer container for styling hooks
+  outer.classList.toggle('readflow-sidebar-open', isOpen);
+  
+  // Clean custom class names on sidebar and set layout position
+  sb.className = '';
+  sb.classList.add(`dock-${dock}`);
+  if (isOpen) {
+    sb.classList.add('open');
+  }
+
+  // Measure native left outline sidebar container width
+  const nativeOpen = outer.classList.contains('sidebarOpen');
+  const nativeSidebar = document.getElementById('sidebarContainer');
+  const nativeWidth = nativeOpen && nativeSidebar ? nativeSidebar.getBoundingClientRect().width : 0;
+
+  // Reset styles before applying dynamic positioning overrides
+  main.style.left = '';
+  main.style.right = '';
+  main.style.top = '';
+  main.style.bottom = '';
+  
+  sb.style.left = '';
+  sb.style.right = '';
+  sb.style.top = '';
+  sb.style.bottom = '';
+  sb.style.width = '';
+  sb.style.height = '';
+
+  // Synchronize docking buttons visual active states
+  const btnLeft = document.getElementById('btn-dock-left');
+  const btnBottom = document.getElementById('btn-dock-bottom');
+  const btnRight = document.getElementById('btn-dock-right');
+  
+  if (btnLeft) btnLeft.classList.toggle('active', dock === 'left');
+  if (btnBottom) btnBottom.classList.toggle('active', dock === 'bottom');
+  if (btnRight) btnRight.classList.toggle('active', dock === 'right');
+
+  if (!isOpen) {
+    // Notebook closed: PDF workspace flows right to native outline edge
+    main.style.left = nativeWidth + 'px';
+    main.style.right = '0';
+    main.style.top = '0';
+    main.style.bottom = '0';
+    
+    sb.style.display = 'none';
+    outer.style.setProperty('--sidebar-width-active', '0px');
+    outer.style.setProperty('--sidebar-height-active', '0px');
+    window.dispatchEvent(new Event('resize'));
+    return;
+  }
+
+  sb.style.display = 'flex';
+
+  // Notebook open: align sidebar and container boundaries by dock position
+  if (dock === 'right') {
+    const w = settings.sidebarWidth || 380;
+    sb.style.width = w + 'px';
+    sb.style.right = '0';
+    sb.style.top = '0';
+    sb.style.height = '100vh';
+
+    main.style.left = nativeWidth + 'px';
+    main.style.right = w + 'px';
+    main.style.top = '0';
+    main.style.bottom = '0';
+
+    outer.style.setProperty('--sidebar-width-active', w + 'px');
+    outer.style.setProperty('--sidebar-height-active', '0px');
+  } 
+  else if (dock === 'left') {
+    const w = settings.sidebarWidth || 380;
+    sb.style.width = w + 'px';
+    sb.style.left = nativeWidth + 'px';
+    sb.style.top = '0';
+    sb.style.height = '100vh';
+
+    main.style.left = (nativeWidth + w) + 'px';
+    main.style.right = '0';
+    main.style.top = '0';
+    main.style.bottom = '0';
+
+    outer.style.setProperty('--sidebar-width-active', '0px');
+    outer.style.setProperty('--sidebar-height-active', '0px');
+  } 
+  else if (dock === 'bottom') {
+    const h = settings.sidebarHeight || 300;
+    sb.style.height = h + 'px';
+    sb.style.left = nativeWidth + 'px';
+    sb.style.right = '0';
+    sb.style.bottom = '0';
+
+    main.style.left = nativeWidth + 'px';
+    main.style.right = '0';
+    main.style.top = '0';
+    main.style.bottom = h + 'px';
+
+    outer.style.setProperty('--sidebar-width-active', '0px');
+    outer.style.setProperty('--sidebar-height-active', h + 'px');
+  }
+
+  // Force PDF.js viewport re-layout zoom alignment and scale recalculation
+  window.dispatchEvent(new Event('resize'));
+  if (window.PDFViewerApplication && window.PDFViewerApplication.pdfViewer) {
+    const viewer = window.PDFViewerApplication.pdfViewer;
+    if (viewer.currentScaleValue === 'auto' || 
+        viewer.currentScaleValue === 'page-width' || 
+        viewer.currentScaleValue === 'page-fit' ||
+        viewer.currentScaleValue === 'page-height') {
+      viewer.currentScaleValue = viewer.currentScaleValue;
+    }
+  }
+}
+
+function initResizer() {
+  const resizer = document.getElementById('sidebar-resizer');
+  if (!resizer) return;
+
+  let isDragging = false;
+  let startX = 0;
+  let startY = 0;
+  let startWidth = 0;
+  let startHeight = 0;
+
+  resizer.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return; // Allow only left click
+    isDragging = true;
+    resizer.classList.add('dragging');
+    
+    // Add resizing class to disable transitions and optimize redraw performance
+    const outer = document.getElementById('outerContainer');
+    if (outer) outer.classList.add('resizing');
+    
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = settings.dockPosition === 'bottom' ? 'ns-resize' : 'ew-resize';
+
+    startX = e.clientX;
+    startY = e.clientY;
+    startWidth = settings.sidebarWidth || 380;
+    startHeight = settings.sidebarHeight || 300;
+
+    e.preventDefault();
+  });
+
+  window.addEventListener('mousemove', (e) => {
+    if (!isDragging) return;
+
+    const dock = settings.dockPosition;
+    if (dock === 'right') {
+      const deltaX = e.clientX - startX;
+      const newWidth = Math.max(200, Math.min(800, startWidth - deltaX));
+      settings.sidebarWidth = newWidth;
+    } 
+    else if (dock === 'left') {
+      const deltaX = e.clientX - startX;
+      const newWidth = Math.max(200, Math.min(800, startWidth + deltaX));
+      settings.sidebarWidth = newWidth;
+    } 
+    else if (dock === 'bottom') {
+      const deltaY = e.clientY - startY;
+      const newHeight = Math.max(150, Math.min(600, startHeight - deltaY));
+      settings.sidebarHeight = newHeight;
+    }
+
+    updateLayout();
+  });
+
+  window.addEventListener('mouseup', () => {
+    const outerContainer = document.getElementById('outerContainer');
+    if (outerContainer) outerContainer.classList.remove('resizing');
+
+    if (isDragging) {
+      isDragging = false;
+      resizer.classList.remove('dragging');
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+      chrome.storage.local.set({ settings });
+    }
+  });
+
+  // --- Native PDF.js Sidebar Resizer drag listener and observer for real-time resizing ---
+  const nativeResizer = document.getElementById('sidebarResizer');
+  const outerContainer = document.getElementById('outerContainer');
+  if (nativeResizer && outerContainer) {
+    nativeResizer.addEventListener('mousedown', () => {
+      outerContainer.classList.add('resizing');
+      
+      let isNativeDragging = true;
+      
+      const onNativeMouseMove = () => {
+        if (isNativeDragging) {
+          updateLayout();
+        }
+      };
+      
+      const onNativeMouseUp = () => {
+        isNativeDragging = false;
+        outerContainer.classList.remove('resizing');
+        window.removeEventListener('mousemove', onNativeMouseMove);
+        window.removeEventListener('mouseup', onNativeMouseUp);
+        updateLayout();
+      };
+      
+      window.addEventListener('mousemove', onNativeMouseMove);
+      window.addEventListener('mouseup', onNativeMouseUp);
+    });
+  }
+
+  const nativeSidebar = document.getElementById('sidebarContainer');
+  if (nativeSidebar) {
+    const nativeObserver = new MutationObserver(() => {
+      updateLayout();
+    });
+    nativeObserver.observe(nativeSidebar, {
+      attributes: true,
+      attributeFilter: ['style', 'class']
+    });
+  }
+}
+
+function switchTab(tab) {
+  const tabVocab = document.getElementById('tab-vocab');
+  const tabSettings = document.getElementById('tab-settings');
+  const paneVocab = document.getElementById('sidebar-vocab-pane');
+  const paneSettings = document.getElementById('sidebar-settings-pane');
+
+  if (tab === 'vocab') {
+    tabVocab.classList.add('active');
+    tabSettings.classList.remove('active');
+    paneVocab.classList.add('active');
+    paneSettings.classList.remove('active');
+    renderSidebarVocabList();
+  } else {
+    tabVocab.classList.remove('active');
+    tabSettings.classList.add('active');
+    paneVocab.classList.remove('active');
+    paneSettings.classList.add('active');
+  }
+}
+
+function toggleAiSettingsVisibility() {
+  if (settings.translationProvider === 'gemini') {
+    aiSettingsGroup.style.display = 'block';
+  } else {
+    aiSettingsGroup.style.display = 'none';
+  }
+}
+
+function updateSettingField() {
+  settings.modifierKey = setModifier.value;
+  settings.targetLang = setLang.value;
+  settings.translationProvider = setProvider.value;
+  settings.geminiApiKey = setAiKey.value;
+  settings.geminiModel = setAiModel.value;
+  settings.cardDetailMode = setCardMode.value;
+  if (setTheme) settings.theme = setTheme.value;
+  if (setAlwaysTranslate) settings.alwaysTranslate = setAlwaysTranslate.checked;
+  if (setToggleShortcutModifier) settings.toggleShortcutModifier = setToggleShortcutModifier.value;
+
+  chrome.storage.local.set({ settings });
+  applyTheme();
+}
+
+// --- Text Selection & Offsets Logic ---
+async function handleTextSelection(e) {
+  const selection = window.getSelection();
+  if (!selection || selection.toString().trim() === '') {
+    return;
+  }
+
+  // Modifier key validation (skipped if alwaysTranslate mode is toggled active)
+  if (!settings.alwaysTranslate) {
+    if (settings.modifierKey === 'Alt' && !e.altKey) return;
+    if (settings.modifierKey === 'Ctrl' && !e.ctrlKey) return;
+    if (settings.modifierKey === 'Shift' && !e.shiftKey) return;
+  }
+
+  const selectedText = selection.toString();
+  const word = selectedText.trim();
+  if (word.length > 80 || /^[0-9\s.,\/#!$%\^&\*;:{}=\-_`~()]+$/.test(word)) {
+    return;
+  }
+
+  const range = selection.getRangeAt(0);
+  const textLayerEl = range.startContainer.parentElement.closest('.textLayer');
+  if (!textLayerEl) return;
+
+  const pageDiv = textLayerEl.closest('.page');
+  const pageNum = parseInt(pageDiv.dataset.pageNumber);
+  const currentPdf = getCurrentPdfName();
+
+  // Reconstruct cleanly spaced text representation using visual layouts
+  const { text: fullPageText, offset: charOffset } = getPageTextAndOffset(textLayerEl, range);
+  
+  // Find trimmed word offsets inside selection text to ignore spacing padding
+  const leadingSpaceLength = selectedText.indexOf(word);
+  const finalCharOffset = charOffset + leadingSpaceLength;
+
+  const context = getContextSentence(fullPageText, finalCharOffset, word.length);
+  const rect = range.getBoundingClientRect();
+
+  // Clear selections
+  selection.removeAllRanges();
+
+  // Loading toast
+  showToastLoading(word, rect);
+
+  try {
+    const translationResult = await translateWord(word, context);
+    
+    // Save to Database
+    const vocabItem = await saveVocabWord({
+      word,
+      translation: translationResult.translation,
+      phonetic: translationResult.phonetic || '',
+      context,
+      pageNum,
+      charOffset: finalCharOffset,
+      length: word.length,
+      currentPdf
+    });
+
+    // Reapply highlights immediately
+    applyPageHighlights(pageNum, textLayerEl);
+
+    // Show toast result
+    showToastResult(vocabItem, rect);
+
+    // Update list & badge count
+    updateBadgeCount();
+    renderSidebarVocabList();
+  } catch (err) {
+    console.error('Translation failed:', err);
+    showToastError(word, rect);
+  }
+}
+
+// Bounding box horizontal & vertical spatial layout text reconstruction
+function getPageTextAndOffset(textLayerEl, range) {
+  let reconstructedText = "";
+  let charOffset = -1;
+  let foundStart = false;
+  let lastRect = null;
+
+  // Retrieve current viewer zoom scale dynamically
+  const zoomScale = window.PDFViewerApplication.pdfViewer.currentScale || 1.0;
+  const yThreshold = 6 * zoomScale;
+  const xThreshold = 1.0 * zoomScale;
+
+  function traverse(node) {
+    if (node === range.startContainer) {
+      charOffset = reconstructedText.length + range.startOffset;
+      foundStart = true;
+    }
+
+    if (node.nodeType === Node.TEXT_NODE) {
+      reconstructedText += node.textContent;
+    } else if (node.nodeType === Node.ELEMENT_NODE) {
+      const tagName = node.tagName.toUpperCase();
+
+      if (tagName === 'BR') {
+        reconstructedText += '\n';
+      } else if (tagName === 'SPAN' || tagName === 'MARK') {
+        const rect = node.getBoundingClientRect();
+
+        // Spacing calculations based on physical gaps
+        if (lastRect && rect.width > 0 && lastRect.width > 0) {
+          const yDiff = Math.abs(rect.top - lastRect.top);
+          const xDiff = rect.left - lastRect.right;
+
+          if (yDiff > yThreshold) {
+            reconstructedText += '\n';
+          } else if (xDiff > xThreshold) {
+            reconstructedText += ' ';
+          }
+        }
+
+        if (rect.width > 0) {
+          lastRect = rect;
+        }
+
+        for (let i = 0; i < node.childNodes.length; i++) {
+          traverse(node.childNodes[i]);
+        }
+      }
+    }
+  }
+
+  for (let i = 0; i < textLayerEl.childNodes.length; i++) {
+    traverse(textLayerEl.childNodes[i]);
+  }
+
+  return { text: reconstructedText, offset: charOffset };
+}
+
+function getContextSentence(fullText, startOffset, wordLength) {
+  const sentenceStarts = ['.', '?', '!', '\n', '\r', '。', '？', '！'];
+  
+  let start = startOffset;
+  while (start > 0) {
+    const char = fullText[start - 1];
+    if (sentenceStarts.includes(char)) {
+      break;
+    }
+    start--;
+  }
+
+  let end = startOffset + wordLength;
+  while (end < fullText.length) {
+    const char = fullText[end];
+    if (sentenceStarts.includes(char)) {
+      end++;
+      break;
+    }
+    end++;
+  }
+
+  let sentence = fullText.slice(start, end).trim();
+  sentence = sentence.replace(/\s+/g, ' ');
+  return sentence;
+}
+
+// --- Translation Engine ---
+async function translateWord(word, context) {
+  const provider = settings.translationProvider;
+  
+  if (provider === 'google') {
+    return await translateGoogle(word);
+  } else if (provider === 'dictionary') {
+    if (/^[A-Za-z\s'-]+$/.test(word)) {
+      try {
+        return await lookupEnglishDictionary(word);
+      } catch (e) {
+        return await translateGoogle(word);
+      }
+    } else {
+      return await translateGoogle(word);
+    }
+  } else if (provider === 'gemini') {
+    if (!settings.geminiApiKey) {
+      throw new Error('AI API Key is missing.');
+    }
+    return await translateGemini(word, context);
+  }
+  return await translateGoogle(word);
+}
+
+async function translateGoogle(word) {
+  const target = settings.targetLang;
+  const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${target}&dt=t&q=${encodeURIComponent(word)}`;
+  
+  const response = await fetch(url);
+  if (!response.ok) throw new Error('Google Translation request failed');
+  
+  const data = await response.json();
+  const translation = data[0].map(item => item[0]).join('').trim();
+  return { translation, phonetic: '' };
+}
+
+async function lookupEnglishDictionary(word) {
+  const url = `https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(word.toLowerCase())}`;
+  
+  const response = await fetch(url);
+  if (!response.ok) throw new Error('Dictionary API failed');
+  
+  const data = await response.json();
+  const entry = data[0];
+  const phonetic = entry.phonetic || (entry.phonetics && entry.phonetics.length > 0 ? entry.phonetics.find(p => p.text)?.text : '') || '';
+  
+  const meanings = entry.meanings.slice(0, 2).map(m => {
+    return `[${m.partOfSpeech}] ${m.definitions[0].definition}`;
+  }).join('; ');
+  
+  return { translation: meanings, phonetic };
+}
+
+async function translateGemini(word, context) {
+  const apiKey = settings.geminiApiKey;
+  const model = settings.geminiModel;
+  const targetLangName = LANG_NAMES[settings.targetLang] || 'Chinese';
+  
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  const prompt = `You are a professional contextual dictionary translator. Translate the word/phrase "${word}" to ${targetLangName} taking its specific context into account.
+Context: "${context}"
+Respond with ONLY the translation, part of speech, and optional phonetic spelling, in a compact dictionary style. Do not include markdown formatting or introductions.`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }]
+    })
+  });
+  
+  if (!response.ok) {
+    const errData = await response.json();
+    throw new Error(errData.error?.message || 'Gemini API failed');
+  }
+
+  const data = await response.json();
+  return { translation: data.candidates[0].content.parts[0].text.trim(), phonetic: '' };
+}
+
+// --- Storage Integration ---
+async function saveVocabWord(wordData) {
+  const vocabId = wordData.currentPdf + '_' + wordData.pageNum + '_' + wordData.charOffset + '_' + wordData.word.toLowerCase();
+  const index = vocabList.findIndex(item => item.id === vocabId);
+  const now = Date.now();
+
+  let item;
+  if (index !== -1) {
+    item = vocabList[index];
+    item.lookups = (item.lookups || 1) + 1;
+    item.timestamp = now;
+  } else {
+    const globalIndex = vocabList.findIndex(item => item.word.toLowerCase() === wordData.word.toLowerCase() && item.source_pdf === wordData.currentPdf);
+    const baseLookups = globalIndex !== -1 ? vocabList[globalIndex].lookups : 0;
+
+    item = {
+      id: vocabId,
+      word: wordData.word,
+      translation: wordData.translation,
+      phonetic: wordData.phonetic,
+      context: wordData.context,
+      source_pdf: wordData.currentPdf,
+      page: wordData.pageNum,
+      charOffset: wordData.charOffset,
+      length: wordData.length,
+      timestamp: now,
+      lookups: baseLookups + 1
+    };
+    vocabList.push(item);
+  }
+
+  // Update lookup counts for all instances of the same word in this doc
+  vocabList.forEach(v => {
+    if (v.word.toLowerCase() === item.word.toLowerCase() && v.source_pdf === wordData.currentPdf) {
+      v.lookups = item.lookups;
+    }
+  });
+
+  await new Promise((resolve) => {
+    chrome.storage.local.set({ vocabList }, resolve);
+  });
+  return item;
+}
+
+async function deleteVocabWord(id) {
+  vocabList = vocabList.filter(item => item.id !== id);
+  await new Promise((resolve) => {
+    chrome.storage.local.set({ vocabList }, resolve);
+  });
+  
+  // Re-apply highlights on all loaded pages to clear deleted marks
+  const pages = document.querySelectorAll('.page[data-page-number]');
+  pages.forEach(pageDiv => {
+    const pageNum = parseInt(pageDiv.dataset.pageNumber);
+    const textLayerDiv = pageDiv.querySelector('.textLayer');
+    if (textLayerDiv) {
+      applyPageHighlights(pageNum, textLayerDiv);
+    }
+  });
+
+  updateBadgeCount();
+  renderSidebarVocabList();
+}
+
+async function clearEntireDatabase() {
+  if (confirm('您确定要清空所有的本地词汇数据库吗？高亮记录与单词卡将永久丢失。')) {
+    vocabList = [];
+    await new Promise((resolve) => {
+      chrome.storage.local.set({ vocabList }, resolve);
+    });
+
+    const pages = document.querySelectorAll('.page[data-page-number]');
+    pages.forEach(pageDiv => {
+      const pageNum = parseInt(pageDiv.dataset.pageNumber);
+      const textLayerDiv = pageDiv.querySelector('.textLayer');
+      if (textLayerDiv) {
+        applyPageHighlights(pageNum, textLayerDiv);
+      }
+    });
+
+    updateBadgeCount();
+    renderSidebarVocabList();
+    alert('生词数据库已成功清空！');
+  }
+}
+
+// --- Highlighting Engine ---
+function applyPageHighlights(pageNum, textLayerContainer) {
+  // Clear existing highlights
+  const marks = textLayerContainer.querySelectorAll('mark.readflow-highlight');
+  marks.forEach(mark => {
+    const parent = mark.parentNode;
+    if (parent) {
+      while (mark.firstChild) {
+        parent.insertBefore(mark.firstChild, mark);
+      }
+      parent.removeChild(mark);
+    }
+  });
+  textLayerContainer.normalize();
+
+  const currentPdf = getCurrentPdfName();
+  const pageWords = vocabList.filter(item => item.source_pdf === currentPdf && item.page === pageNum);
+  
+  // Sort descending by charOffset (right-to-left splits)
+  pageWords.sort((a, b) => b.charOffset - a.charOffset);
+  
+  pageWords.forEach(item => {
+    applyRangeHighlight(textLayerContainer, item.charOffset, item.length, item.lookups, item.id);
+  });
+}
+
+function applyRangeHighlight(container, charOffset, length, lookups, vocabId) {
+  let reconstructedText = "";
+  let lastRect = null;
+  const textNodes = [];
+
+  const zoomScale = window.PDFViewerApplication.pdfViewer.currentScale || 1.0;
+  const yThreshold = 6 * zoomScale;
+  const xThreshold = 1.0 * zoomScale;
+
+  function traverse(node) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const start = reconstructedText.length;
+      reconstructedText += node.textContent;
+      const end = reconstructedText.length;
+      textNodes.push({ node, start, end });
+    } else if (node.nodeType === Node.ELEMENT_NODE) {
+      const tagName = node.tagName.toUpperCase();
+      
+      if (tagName === 'BR') {
+        reconstructedText += '\n';
+      } else if (tagName === 'SPAN' || tagName === 'MARK') {
+        const rect = node.getBoundingClientRect();
+
+        if (lastRect && rect.width > 0 && lastRect.width > 0) {
+          const yDiff = Math.abs(rect.top - lastRect.top);
+          const xDiff = rect.left - lastRect.right;
+          
+          if (yDiff > yThreshold) {
+            reconstructedText += '\n';
+          } else if (xDiff > xThreshold) {
+            reconstructedText += ' ';
+          }
+        }
+
+        if (rect.width > 0) {
+          lastRect = rect;
+        }
+
+        for (let i = 0; i < node.childNodes.length; i++) {
+          traverse(node.childNodes[i]);
+        }
+      }
+    }
+  }
+
+  for (let i = 0; i < container.childNodes.length; i++) {
+    traverse(container.childNodes[i]);
+  }
+
+  const targetStart = charOffset;
+  const targetEnd = charOffset + length;
+
+  for (const item of textNodes) {
+    const overlapStart = Math.max(item.start, targetStart);
+    const overlapEnd = Math.min(item.end, targetEnd);
+
+    if (overlapStart < overlapEnd) {
+      const localStart = overlapStart - item.start;
+      const localLength = overlapEnd - overlapStart;
+
+      try {
+        const textNodeToHighlight = item.node.splitText(localStart);
+        textNodeToHighlight.splitText(localLength);
+
+        const mark = document.createElement('mark');
+        mark.className = `readflow-highlight level-${Math.min(lookups || 1, 3)}`;
+        mark.dataset.vocabId = vocabId;
+        mark.dataset.word = textNodeToHighlight.textContent;
+
+        textNodeToHighlight.parentNode.insertBefore(mark, textNodeToHighlight);
+        mark.appendChild(textNodeToHighlight);
+      } catch (err) {
+        console.warn("Failed splitting text node for highlight range:", err);
+      }
+    }
+  }
+}
+
+// --- Floating Toast tooltips UI ---
+function showToastLoading(word, selectionRect) {
+  removeToast();
+  
+  const toast = document.createElement('div');
+  toast.className = 'readflow-toast';
+  toast.innerHTML = `
+    <div class="toast-header">
+      <span class="toast-word">${escapeHtml(word)}</span>
+    </div>
+    <div style="font-size: 11px; color: var(--text-muted);">正在查询翻译...</div>
+  `;
+  
+  positionAndShowToast(toast, selectionRect);
+}
+
+function showToastResult(vocabItem, selectionRect) {
+  removeToast();
+
+  const toast = document.createElement('div');
+  toast.className = 'readflow-toast';
+  
+  const phoneticHtml = vocabItem.phonetic 
+    ? `<div class="toast-dict-phonetic">${escapeHtml(vocabItem.phonetic)}</div>` 
+    : '';
+
+  toast.innerHTML = `
+    <div class="toast-header">
+      <span class="toast-word" title="${escapeHtml(vocabItem.word)}">${escapeHtml(vocabItem.word)}</span>
+      <div class="toast-actions">
+        <button class="toast-action-btn speak-btn" title="朗读单词">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+            <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+          </svg>
+        </button>
+        <button class="toast-action-btn close-btn" title="关闭">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+    </div>
+    ${phoneticHtml}
+    <div class="toast-translation">${escapeHtml(vocabItem.translation)}</div>
+    <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 4px;">
+      <span class="toast-badge">已记录 (${vocabItem.lookups}次)</span>
+      <span style="font-size: 9px; color: var(--text-muted);">P. ${vocabItem.page}</span>
+    </div>
+  `;
+
+  toast.querySelector('.speak-btn').addEventListener('click', (e) => {
+    e.stopPropagation();
+    speakWord(vocabItem.word);
+  });
+
+  toast.querySelector('.close-btn').addEventListener('click', (e) => {
+    e.stopPropagation();
+    removeToast();
+  });
+
+  toast.addEventListener('mouseenter', () => {
+    if (toastTimeout) clearTimeout(toastTimeout);
+  });
+
+  toast.addEventListener('mouseleave', () => {
+    startToastFadeTimer(1000);
+  });
+
+  positionAndShowToast(toast, selectionRect);
+  startToastFadeTimer(2500);
+}
+
+function showToastError(word, selectionRect) {
+  removeToast();
+  
+  const toast = document.createElement('div');
+  toast.className = 'readflow-toast';
+  toast.innerHTML = `
+    <div class="toast-header">
+      <span class="toast-word">${escapeHtml(word)}</span>
+      <button class="toast-action-btn close-btn">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      </button>
+    </div>
+    <div style="font-size: 11px; color: var(--danger);">翻译请求失败，请检查网络。</div>
+  `;
+  
+  toast.querySelector('.close-btn').addEventListener('click', () => removeToast());
+  positionAndShowToast(toast, selectionRect);
+  startToastFadeTimer(3000);
+}
+
+function positionAndShowToast(toast, selectionRect) {
+  const viewerContainer = document.getElementById('viewerContainer');
+  viewerContainer.appendChild(toast);
+  
+  const viewportRect = viewerContainer.getBoundingClientRect();
+  const toastWidth = toast.offsetWidth || 260;
+  const toastHeight = toast.offsetHeight || 100;
+  
+  let left = selectionRect.left - viewportRect.left + viewerContainer.scrollLeft + (selectionRect.width / 2) - (toastWidth / 2);
+  let top = selectionRect.top - viewportRect.top + viewerContainer.scrollTop - toastHeight - 12;
+
+  // Align boundaries
+  if (left < 10) left = 10;
+  if (left + toastWidth > viewerContainer.scrollWidth - 10) {
+    left = viewerContainer.scrollWidth - toastWidth - 10;
+  }
+  
+  if (selectionRect.top - viewportRect.top < toastHeight + 20) {
+    top = selectionRect.top - viewportRect.top + viewerContainer.scrollTop + selectionRect.height + 12;
+  }
+
+  toast.style.left = `${left}px`;
+  toast.style.top = `${top}px`;
+
+  requestAnimationFrame(() => {
+    toast.classList.add('active');
+  });
+}
+
+function removeToast() {
+  if (toastTimeout) clearTimeout(toastTimeout);
+  const toast = document.querySelector('.readflow-toast');
+  if (toast) {
+    toast.classList.remove('active');
+    setTimeout(() => {
+      if (toast && toast.parentNode) toast.parentNode.removeChild(toast);
+    }, 250);
+  }
+}
+
+function startToastFadeTimer(duration) {
+  if (toastTimeout) clearTimeout(toastTimeout);
+  toastTimeout = setTimeout(() => {
+    removeToast();
+  }, duration);
+}
+
+function speakWord(word) {
+  if ('speechSynthesis' in window) {
+    const utterance = new SpeechSynthesisUtterance(word);
+    utterance.lang = 'en-US';
+    window.speechSynthesis.speak(utterance);
+  }
+}
+
+// --- Sidebar Vocabulary Manager ---
+function renderSidebarVocabList() {
+  if (!vocabListContainer) return;
+  vocabListContainer.innerHTML = '';
+  
+  const query = searchInput.value.toLowerCase().trim();
+  const scope = selectScope.value;
+  const sort = selectSort.value;
+  const currentPdf = getCurrentPdfName();
+
+  let list = vocabList;
+  if (scope === 'current') {
+    list = vocabList.filter(item => item.source_pdf === currentPdf);
+  }
+
+  if (query) {
+    list = list.filter(item => 
+      item.word.toLowerCase().includes(query) || 
+      item.translation.toLowerCase().includes(query) || 
+      item.context.toLowerCase().includes(query)
+    );
+  }
+
+  list.sort((a, b) => {
+    if (sort === 'time-desc') return b.timestamp - a.timestamp;
+    if (sort === 'time-asc') return a.timestamp - b.timestamp;
+    if (sort === 'lookups-desc') return b.lookups - a.lookups;
+    if (sort === 'alpha') return a.word.localeCompare(b.word);
+    return 0;
+  });
+
+  if (list.length === 0) {
+    vocabListContainer.innerHTML = `
+      <div class="empty-state">
+        <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity: 0.4;">
+          <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path>
+          <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>
+        </svg>
+        <p>${query ? '未搜索到匹配的词汇' : '词汇列表为空'}</p>
+      </div>
+    `;
+    return;
+  }
+
+  const cardMode = settings.cardDetailMode || 'contextual';
+  list.forEach(item => {
+    const card = document.createElement('div');
+    card.className = `vocab-card level-${Math.min(item.lookups || 1, 3)} card-mode-${cardMode}`;
+    const contextHtml = highlightWordInText(item.context, item.word);
+
+    let innerContent = `
+      <div class="card-top">
+        <div class="card-word-title">
+          <span>${escapeHtml(item.word)}</span>
+          <span class="card-lookups-badge">${item.lookups || 1}次查询</span>
+        </div>
+        <div class="card-actions">
+          <button class="card-btn speak-btn" title="朗读" aria-label="朗读单词">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+              <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+            </svg>
+          </button>
+          <button class="card-btn jump-btn" title="跳转到 PDF 页面" aria-label="跳转到 PDF 页面">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"></circle>
+              <circle cx="12" cy="12" r="6"></circle>
+              <circle cx="12" cy="12" r="2"></circle>
+            </svg>
+          </button>
+          <button class="card-btn delete-btn delete" title="删除" aria-label="删除单词">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="3 6 5 6 21 6"></polyline>
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+              <line x1="10" y1="11" x2="10" y2="17"></line>
+              <line x1="14" y1="11" x2="14" y2="17"></line>
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div class="card-translation">${escapeHtml(item.translation)}</div>
+    `;
+
+    if (cardMode !== 'minimal') {
+      innerContent += `<div class="card-context">${contextHtml}</div>`;
+    }
+
+    if (cardMode === 'full') {
+      innerContent += `
+        <div class="card-meta">
+          <span class="source-pdf" title="${escapeHtml(item.source_pdf)}">
+            <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display: inline-block; vertical-align: middle; margin-right: 3px; opacity: 0.8;">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+            </svg>
+            <span>${escapeHtml(item.source_pdf)}</span>
+          </span>
+          <span>第 ${item.page} 页</span>
+        </div>
+      `;
+    }
+
+    card.innerHTML = innerContent;
+
+    card.querySelector('.speak-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      speakWord(item.word);
+    });
+
+    card.querySelector('.jump-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      jumpToWordLocation(item);
+    });
+
+    card.querySelector('.delete-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      deleteVocabWord(item.id);
+    });
+
+    card.addEventListener('dblclick', () => {
+      jumpToWordLocation(item);
+    });
+
+    vocabListContainer.appendChild(card);
+  });
+}
+
+function jumpToWordLocation(item) {
+  // Use PDF.js official Application API to natively jump pages
+  if (window.PDFViewerApplication) {
+    window.PDFViewerApplication.page = item.page;
+    
+    // After page changes and renders, trigger flashing highlights
+    setTimeout(() => {
+      const pageDiv = document.querySelector(`.page[data-page-number="${item.page}"]`);
+      if (!pageDiv) return;
+      
+      const mark = pageDiv.querySelector(`mark[data-vocab-id="${item.id}"]`);
+      if (mark) {
+        mark.classList.add('highlight-flash');
+        setTimeout(() => {
+          mark.classList.remove('highlight-flash');
+        }, 1000);
+      }
+    }, 500);
+  }
+}
+
+function highlightWordInText(text, word) {
+  if (!text || !word) return text;
+  const escapedWord = word.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+  const regex = new RegExp(`(${escapedWord})`, 'gi');
+  return text.replace(regex, '<mark>$1</mark>');
+}
+
+// --- CSV and Anki Card Exports ---
+function exportVocabCsv() {
+  let list = vocabList;
+  const currentPdf = getCurrentPdfName();
+  if (selectScope.value === 'current') {
+    list = vocabList.filter(item => item.source_pdf === currentPdf);
+  }
+
+  if (list.length === 0) {
+    alert('当前没有可导出的词汇！');
+    return;
+  }
+
+  const csvRows = [
+    ['Word', 'Translation', 'Context', 'Source PDF', 'Page', 'Timestamp']
+  ];
+
+  list.forEach(item => {
+    csvRows.push([
+      item.word,
+      item.translation,
+      item.context,
+      item.source_pdf,
+      item.page.toString(),
+      new Date(item.timestamp).toLocaleString()
+    ]);
+  });
+
+  const csvContent = "data:text/csv;charset=utf-8,\ufeff" 
+    + csvRows.map(e => e.map(val => `"${val.replace(/"/g, '""')}"`).join(",")).join("\n");
+  
+  const encodedUri = encodeURI(csvContent);
+  const link = document.createElement("a");
+  link.setAttribute("href", encodedUri);
+  link.setAttribute("download", `ReadFlow_Export_${Date.now()}.csv`);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+
+function exportVocabAnki() {
+  let list = vocabList;
+  const currentPdf = getCurrentPdfName();
+  if (selectScope.value === 'current') {
+    list = vocabList.filter(item => item.source_pdf === currentPdf);
+  }
+
+  if (list.length === 0) {
+    alert('当前没有可导出的词汇！');
+    return;
+  }
+
+  let fileContent = '';
+  list.forEach(item => {
+    const word = item.word;
+    const phonetic = item.phonetic ? `[${item.phonetic}] ` : '';
+    const translation = item.translation.replace(/\n/g, '<br>');
+    const boldWordInContext = item.context.replace(new RegExp(`(${word.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')})`, 'gi'), '<b>$1</b>');
+    const context = boldWordInContext.replace(/\n/g, '<br>');
+    const source = `${item.source_pdf} (P.${item.page})`;
+
+    const backContent = `${phonetic}<strong>${translation}</strong><br><br><small>Context: ${context}</small><br><br><small style="color:#888;">Source: ${source}</small>`;
+    fileContent += `${word}\t${backContent}\n`;
+  });
+
+  const blob = new Blob([fileContent], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.setAttribute("href", url);
+  link.setAttribute("download", `Anki_ReadFlow_${Date.now()}.txt`);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+// --- Helpers ---
+function getCurrentPdfName() {
+  try {
+    if (!window.PDFViewerApplication) return 'document.pdf';
+    const app = window.PDFViewerApplication;
+    
+    // Check if the title is set and ends with .pdf (e.g. from local file open or drag-and-drop)
+    if (app._title && app._title.toLowerCase().endsWith('.pdf')) {
+      return app._title;
+    }
+    
+    const url = app.url;
+    if (!url) return 'document.pdf';
+    if (url.startsWith('blob:')) {
+      return app.contentDispositionFilename || 'local_document.pdf';
+    }
+    const pathname = new URL(url).pathname;
+    const parts = pathname.split('/');
+    const lastPart = parts[parts.length - 1];
+    return lastPart.endsWith('.pdf') ? decodeURIComponent(lastPart) : 'document.pdf';
+  } catch (e) {
+    return 'document.pdf';
+  }
+}
+
+function escapeHtml(unsafe) {
+  return unsafe
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+// --- Theme Applier ---
+function applyTheme() {
+  const theme = settings.theme || 'light';
+  const outer = document.getElementById('outerContainer');
+  if (!outer) return;
+  
+  if (theme === 'light') {
+    outer.setAttribute('data-theme', 'light');
+  } else {
+    outer.setAttribute('data-theme', 'dark');
+  }
+  
+  const viewer = document.getElementById('viewer');
+  if (viewer) {
+    viewer.classList.toggle('invert-pages', theme === 'dark-all');
+  }
+}
+
+// --- Welcome Screen Overlay Loader ---
+function initWelcomeOverlay() {
+  const urlParams = new URLSearchParams(window.location.search);
+  const hasFile = urlParams.has('file');
+  
+  if (!hasFile) {
+    if (document.getElementById('readflow-welcome-overlay')) return;
+    
+    const overlay = document.createElement('div');
+    overlay.id = 'readflow-welcome-overlay';
+    overlay.innerHTML = `
+      <div class="welcome-card">
+        <div class="welcome-title">ReadFlow PDF 阅读器</div>
+        <div class="welcome-subtitle">开始您的顺流阅读之旅，双击词汇即刻翻译并记录。</div>
+        
+        <div id="welcome-dropzone" class="welcome-dropzone">
+          <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="17 8 12 3 7 8"></polyline>
+            <line x1="12" y1="3" x2="12" y2="15"></line>
+          </svg>
+          <span>拖拽 PDF 文件到此处</span>
+          <p>或者点击区域浏览本地文件</p>
+        </div>
+      </div>
+    `;
+    
+    const outerContainer = document.getElementById('outerContainer');
+    if (outerContainer) {
+      outerContainer.appendChild(overlay);
+    }
+    
+    const dropzone = document.getElementById('welcome-dropzone');
+    if (dropzone) {
+      dropzone.addEventListener('click', () => {
+        const fileInput = document.getElementById('fileInput');
+        if (fileInput) fileInput.click();
+      });
+      
+      dropzone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dropzone.classList.add('drag-over');
+      });
+      
+      dropzone.addEventListener('dragleave', () => {
+        dropzone.classList.remove('drag-over');
+      });
+      
+      dropzone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropzone.classList.remove('drag-over');
+        
+        const files = e.dataTransfer.files;
+        if (files && files.length > 0) {
+          const file = files[0];
+          if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+            if (window.PDFViewerApplication) {
+              window.PDFViewerApplication.open({
+                url: URL.createObjectURL(file),
+                originalUrl: file.name
+              });
+            }
+          } else {
+            alert('请选择有效的 PDF 文件！');
+          }
+        }
+      });
+    }
+  }
+}
+
+function hideWelcomeOverlay() {
+  const overlay = document.getElementById('readflow-welcome-overlay');
+  if (overlay) {
+    overlay.classList.add('hidden');
+    setTimeout(() => {
+      if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
+    }, 300);
+  }
+}
+
+// --- System Toast Messages ---
+function showSystemToast(message) {
+  const existing = document.querySelector('.readflow-toast.system-toast');
+  if (existing && existing.parentNode) {
+    existing.parentNode.removeChild(existing);
+  }
+  
+  const toast = document.createElement('div');
+  toast.className = 'readflow-toast system-toast';
+  toast.style.position = 'fixed';
+  toast.style.top = '24px';
+  toast.style.left = '50%';
+  toast.style.transform = 'translateX(-50%) translateY(-20px)';
+  toast.style.transition = 'all var(--transition-normal)';
+  toast.style.opacity = '0';
+  toast.style.zIndex = '10000002';
+  toast.style.background = 'var(--primary)';
+  toast.style.color = '#ffffff';
+  toast.style.padding = '10px 20px';
+  toast.style.borderRadius = '20px';
+  toast.style.boxShadow = 'var(--shadow-lg)';
+  toast.style.fontSize = '12px';
+  toast.style.fontWeight = '600';
+  
+  toast.innerHTML = `
+    <div style="display: flex; align-items: center; gap: 8px;">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10"></circle>
+        <line x1="12" y1="16" x2="12" y2="12"></line>
+        <line x1="12" y1="8" x2="12.01" y2="8"></line>
+      </svg>
+      <span>${escapeHtml(message)}</span>
+    </div>
+  `;
+  
+  document.body.appendChild(toast);
+  
+  requestAnimationFrame(() => {
+    toast.style.transform = 'translateX(-50%) translateY(0)';
+    toast.style.opacity = '1';
+  });
+  
+  setTimeout(() => {
+    toast.style.transform = 'translateX(-50%) translateY(-20px)';
+    toast.style.opacity = '0';
+    setTimeout(() => {
+      if (toast && toast.parentNode) toast.parentNode.removeChild(toast);
+    }, 300);
+  }, 2500);
+}
