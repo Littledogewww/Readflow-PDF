@@ -1,26 +1,25 @@
-/* popup.css - Elegant Light Paper Redesign */
+/* popup.css - ReadFlow PDF v2.0 */
 
 :root {
-  /* Premium Elegant Light Paper Palette (Kindle-style) */
-  --bg-app: #fdfaf2;          /* Kindle-like warm paper/cream */
-  --bg-card: #ffffff;         /* Crisp white cards for visual pop */
-  --bg-card-hover: #faf8f3;   /* Soft warm hover */
-  --bg-highlight: #fcfbf7;    /* Subtle highlight box background */
-  
-  --text-main: #2d3748;       /* High-contrast charcoal text (WCAG compliant) */
-  --text-muted: #718096;      /* Soft grey for meta and subtitles */
-  
-  --primary: #d35400;         /* Terracotta rust orange */
+  --bg-app: #fdfaf2;
+  --bg-card: #ffffff;
+  --bg-card-hover: #faf8f3;
+  --bg-highlight: #fcfbf7;
+
+  --text-main: #2d3748;
+  --text-muted: #718096;
+
+  --primary: #d35400;
   --primary-hover: #e67e22;
   --primary-gradient: linear-gradient(135deg, #d35400 0%, #e67e22 100%);
   --success: #27ae60;
-  
-  --border: #ebdcb9;          /* Warm beige borders */
-  
+
+  --border: #ebdcb9;
+
   --shadow-sm: 0 1px 3px rgba(139, 125, 93, 0.12);
   --shadow-md: 0 4px 12px rgba(139, 125, 93, 0.14);
   --shadow-lg: 0 10px 24px rgba(139, 125, 93, 0.16);
-  
+
   --font-title: 'Outfit', sans-serif;
   --font-body: 'Inter', sans-serif;
 
@@ -105,8 +104,8 @@ body {
 }
 
 @keyframes pulse-dot {
-  0% { box-shadow: 0 0 0 0 rgba(39, 174, 96, 0.4); }
-  70% { box-shadow: 0 0 0 6px rgba(39, 174, 96, 0); }
+  0%   { box-shadow: 0 0 0 0 rgba(39, 174, 96, 0.4); }
+  70%  { box-shadow: 0 0 0 6px rgba(39, 174, 96, 0); }
   100% { box-shadow: 0 0 0 0 rgba(39, 174, 96, 0); }
 }
 
@@ -132,8 +131,8 @@ body {
   justify-content: center;
   gap: 4px;
   box-shadow: var(--shadow-sm);
-  transition: transform var(--transition-fast), 
-              border-color var(--transition-fast), 
+  transition: transform var(--transition-fast),
+              border-color var(--transition-fast),
               box-shadow var(--transition-fast);
   cursor: default;
 }
@@ -173,7 +172,7 @@ body {
   font-family: var(--font-body);
   font-size: 13px;
   font-weight: 600;
-  padding: 12px;
+  padding: 11px 14px;
   border-radius: 10px;
   border: none;
   cursor: pointer;
@@ -181,9 +180,12 @@ body {
   justify-content: center;
   align-items: center;
   gap: 6px;
-  transition: transform var(--transition-fast), 
-              opacity var(--transition-fast), 
-              box-shadow var(--transition-fast);
+  transition: transform var(--transition-fast),
+              opacity var(--transition-fast),
+              box-shadow var(--transition-fast),
+              border-color var(--transition-fast),
+              background-color var(--transition-fast),
+              color var(--transition-fast);
 }
 
 .btn-primary {
@@ -210,10 +212,25 @@ body {
   display: flex;
   align-items: center;
   transition: transform var(--transition-fast);
+  margin-left: auto;
 }
 
 .btn-primary:hover .arrow {
   transform: translateX(4px);
+}
+
+.btn-secondary {
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  font-size: 12px;
+  padding: 8px 14px;
+}
+
+.btn-secondary:hover {
+  color: var(--primary);
+  border-color: var(--primary);
+  background-color: rgba(211, 84, 0, 0.04);
 }
 
 .settings-summary {
@@ -257,21 +274,21 @@ body {
   margin-top: 4px;
 }
 
-/* --- Dark Theme Variables Override --- */
+/* --- Dark Theme --- */
 [data-theme="dark"] {
-  --bg-app: #121824;          /* Sleek dark background */
-  --bg-card: #1f293d;         /* Card background */
-  --bg-card-hover: #2a374f;   /* Card hover background */
+  --bg-app: #121824;
+  --bg-card: #1f293d;
+  --bg-card-hover: #2a374f;
   --bg-highlight: #1e2638;
-  
-  --text-main: #f8fafc;       /* Crisp white text */
-  --text-muted: #94a3b8;      /* Slate muted gray */
-  
-  --primary: #f97316;         /* Bright orange primary */
+
+  --text-main: #f8fafc;
+  --text-muted: #94a3b8;
+
+  --primary: #f97316;
   --primary-hover: #fb923c;
   --primary-gradient: linear-gradient(135deg, #f97316 0%, #fb923c 100%);
-  --border: rgba(148, 163, 184, 0.15); /* Sleek slate borders */
-  
+  --border: rgba(148, 163, 184, 0.15);
+
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
   --shadow-lg: 0 10px 24px rgba(0, 0, 0, 0.5);

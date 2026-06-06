@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ReadFlow 书架</title>
+  <meta name="description" content="ReadFlow PDF 书架 - 您的所有 PDF 文档，一目了然">
+  <link rel="stylesheet" href="library.css">
+</head>
+<body>
+
+  <!-- Header -->
+  <header class="lib-header" role="banner">
+    <a class="lib-logo" href="#" aria-label="ReadFlow PDF 首页">
+      <svg class="lib-logo-icon" viewBox="0 0 24 24" width="24" height="24" fill="none"
+           stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M2 6c.6.5 1.2 1 2.5 1C7 7 7 5 9.5 5c2.6 0 2.6 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"></path>
+        <path d="M2 12c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 2.6 0 2.6 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"></path>
+        <path d="M2 18c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 2.6 0 2.6 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"></path>
+      </svg>
+      <span class="lib-logo-text">ReadFlow <span class="lib-logo-badge">PDF</span></span>
+    </a>
+
+    <div class="lib-search-wrapper" role="search">
+      <span class="lib-search-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.5"
+             stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="8"></circle>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+        </svg>
+      </span>
+      <input id="lib-search-input" class="lib-search" type="search"
+             placeholder="搜索书架..." aria-label="搜索书架">
+    </div>
+
+    <div class="lib-actions">
+      <button id="lib-add-btn" class="lib-btn lib-btn-primary" aria-label="添加 PDF 文件">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.5"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <line x1="12" y1="5" x2="12" y2="19"></line>
+          <line x1="5" y1="12" x2="19" y2="12"></line>
+        </svg>
+        <span>添加文件</span>
+      </button>
+      <button id="lib-theme-btn" class="lib-btn lib-btn-ghost" aria-label="切换深浅色模式" title="切换主题">
+        <svg id="lib-theme-icon-sun" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
+             stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="5"></circle>
+          <line x1="12" y1="1" x2="12" y2="3"></line>
+          <line x1="12" y1="21" x2="12" y2="23"></line>
+          <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+          <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+          <line x1="1" y1="12" x2="3" y2="12"></line>
+          <line x1="21" y1="12" x2="23" y2="12"></line>
+          <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+          <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+        </svg>
+        <svg id="lib-theme-icon-moon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
+             stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="display:none">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Book Grid -->
+  <main class="lib-main" role="main" id="lib-main">
+    <div class="lib-section-header">
+      <h1 class="lib-section-title">书架</h1>
+      <span class="lib-section-count" id="lib-count">正在加载...</span>
+    </div>
+
+    <div id="lib-grid" class="lib-grid" role="list" aria-label="PDF 书架">
+      <!-- Book cards injected by JS -->
+      <div class="lib-loading" id="lib-loading-state">
+        <div class="spinner"></div>
+        <span>正在加载书架...</span>
+      </div>
+    </div>
+
+    <!-- Empty state (hidden by default) -->
+    <div class="lib-empty" id="lib-empty-state" style="display:none" role="status">
+      <svg class="lib-empty-icon" viewBox="0 0 24 24" width="72" height="72" fill="none"
+           stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+        <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+      </svg>
+      <p class="lib-empty-title">书架还是空的</p>
+      <p class="lib-empty-sub">将 PDF 文件拖到下方区域，或点击「添加文件」按钮来添加您的第一本书。</p>
+      <button id="lib-empty-add-btn" class="lib-btn lib-btn-primary" aria-label="添加您的第一本书">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.5"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <line x1="12" y1="5" x2="12" y2="19"></line>
+          <line x1="5" y1="12" x2="19" y2="12"></line>
+        </svg>
+        <span>添加第一本书</span>
+      </button>
+    </div>
+  </main>
+
+  <!-- Footer Drop Zone -->
+  <footer class="lib-footer" id="lib-footer" role="region" aria-label="拖放区域">
+    <div class="lib-dropzone-content">
+      <svg class="lib-dropzone-icon" viewBox="0 0 24 24" width="28" height="28" fill="none"
+           stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+        <polyline points="17 8 12 3 7 8"></polyline>
+        <line x1="12" y1="3" x2="12" y2="15"></line>
+      </svg>
+      <span class="lib-dropzone-text">拖拽 PDF 到这里</span>
+      <span class="lib-dropzone-sub">或点击「添加文件」选择文件</span>
+    </div>
+  </footer>
+
+  <!-- Full-screen drag overlay -->
+  <div class="lib-drag-overlay" id="lib-drag-overlay" aria-hidden="true">
+    <svg viewBox="0 0 24 24" width="64" height="64" fill="none" stroke="var(--primary)" stroke-width="1.5"
+         stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+      <polyline points="17 8 12 3 7 8"></polyline>
+      <line x1="12" y1="3" x2="12" y2="15"></line>
+    </svg>
+    <p class="lib-drag-overlay-text">松开以添加到书架</p>
+  </div>
+
+  <!-- Context Menu (injected dynamically) -->
+
+  <!-- Toast -->
+  <div class="lib-toast" id="lib-toast" role="alert" aria-live="polite"></div>
+
+  <!-- Hidden file input -->
+  <input type="file" id="lib-file-input" accept=".pdf" multiple style="display:none"
+         aria-label="选择 PDF 文件">
+
+  <script src="library.js"></script>
+</body>
+</html>

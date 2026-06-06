@@ -37,14 +37,21 @@
     </div>
 
     <div class="quick-actions">
-      <button id="btn-open-viewer" class="btn btn-primary" aria-label="打开 PDF 阅读器">
-        <span>打开 PDF 阅读器</span>
+      <button id="btn-open-library" class="btn btn-primary" aria-label="打开书架">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="pointer-events: none; flex-shrink: 0;">
+          <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+          <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+        </svg>
+        <span>打开书架</span>
         <span class="arrow">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="pointer-events: none;">
             <line x1="5" y1="12" x2="19" y2="12"></line>
             <polyline points="12 5 19 12 12 19"></polyline>
           </svg>
         </span>
+      </button>
+      <button id="btn-open-viewer" class="btn btn-secondary" aria-label="直接打开阅读器">
+        <span>打开 PDF 阅读器</span>
       </button>
     </div>
 
@@ -57,10 +64,14 @@
         <span class="lbl">目标语言</span>
         <span class="val" id="summary-lang">中文 (简体)</span>
       </div>
+      <div class="setting-item">
+        <span class="lbl">启动行为</span>
+        <span class="val" id="summary-startup">进入书架</span>
+      </div>
     </div>
 
     <div class="footer">
-      <span>ReadFlow PDF v1.1.0 • 顺流阅读，高效记忆</span>
+      <span>ReadFlow PDF v2.0.0 • 顺流阅读，高效记忆</span>
     </div>
   </div>
   <script src="popup.js"></script>

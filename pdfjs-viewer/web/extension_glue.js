@@ -8,15 +8,23 @@ let settings = {
   translationProvider: 'google',
   geminiApiKey: '',
   geminiModel: 'gemini-1.5-flash',
-  dockPosition: 'right', // 'right', 'left', 'bottom'
-  sidebarWidth: 380,     // width for left/right docking
-  sidebarHeight: 300,    // height for bottom docking
-  sidebarOpen: false,    // persistence of open state
-  cardDetailMode: 'contextual', // 'minimal', 'contextual', 'full'
+  dockPosition: 'right',
+  sidebarWidth: 380,
+  sidebarHeight: 300,
+  sidebarOpen: false,
+  cardDetailMode: 'contextual',
   toggleShortcutModifier: 'Alt',
   toggleShortcutKey: 'b',
   alwaysTranslate: false,
-  theme: 'light' // 'light', 'dark-ui', 'dark-all'
+  theme: 'light',
+  // v2.0 new fields
+  accentHue: 20,
+  accentSaturation: 75,
+  startupBehavior: 'library',
+  customAiBaseUrl: '',
+  customAiKey: '',
+  customAiModel: 'deepseek-chat',
+  customAiPrompt: 'You are a professional academic translator and contextual dictionary.\nTranslate the term "{word}" from its academic context into {targetLang}.\n\nContext sentence: "{context}"\n\nRules:\n1. Provide the most precise translation that fits the academic/technical context\n2. If it is an English term, also provide: [part of speech] phonetic (if applicable)\n3. Add a brief academic definition (1 sentence max)\n4. Format: Translation | [optional: phonetic] | [optional: definition]\n5. Response must be concise, dictionary-style. No markdown, no extra explanation.',
 };
 let toastTimeout = null;
 
@@ -49,6 +57,14 @@ let setTheme = null;
 let setAlwaysTranslate = null;
 let setToggleShortcutModifier = null;
 let setToggleShortcutKey = null;
+// v2.0 new elements
+let setAccentHue = null;
+let setStartupBehavior = null;
+let setCustomAiBaseUrl = null;
+let setCustomAiKey = null;
+let setCustomAiModel = null;
+let setCustomAiPrompt = null;
+let customAiSettingsGroup = null;
 
 // --- Initialize when DOM is loaded ---
 document.addEventListener('DOMContentLoaded', async () => {
@@ -85,8 +101,38 @@ document.addEventListener('DOMContentLoaded', async () => {
       window.PDFViewerApplication.eventBus.on('sidebarviewchanged', () => {
         setTimeout(updateLayout, 50);
       });
-      window.PDFViewerApplication.eventBus.on('pagesinit', () => {
+      window.PDFViewerApplication.eventBus.on('pagesinit', async () => {
         hideWelcomeOverlay();
+        
+        // Restore last read page
+        const urlParams = new URLSearchParams(window.location.search);
+        const bookId = urlParams.get('bookId');
+        if (bookId) {
+          try {
+            const db = await openLibraryDB();
+            const tx = db.transaction(LIB_STORE_NAME, 'readonly');
+            const store = tx.objectStore(LIB_STORE_NAME);
+            const entry = await new Promise((resolve) => {
+              const req = store.get(bookId);
+              req.onsuccess = () => resolve(req.result);
+              req.onerror = () => resolve(null);
+            });
+            if (entry && entry.lastReadPage && entry.lastReadPage > 1) {
+              window.PDFViewerApplication.page = entry.lastReadPage;
+            }
+          } catch (err) {
+            console.error('[ReadFlow] Failed to restore page:', err);
+          }
+        }
+      });
+
+      // Auto save page on page changing
+      window.PDFViewerApplication.eventBus.on('pagechanging', (e) => {
+        const urlParams = new URLSearchParams(window.location.search);
+        const bookId = urlParams.get('bookId');
+        if (bookId && e.pageNumber) {
+          saveLastReadPage(bookId, e.pageNumber);
+        }
       });
       
       // Initial Layout Update
@@ -266,12 +312,13 @@ function injectSidebarDOM() {
             <option value="google">Google 翻译 (内置)</option>
             <option value="dictionary">英汉/英英词典 (仅英文)</option>
             <option value="gemini">Gemini AI (上下文翻译)</option>
+            <option value="custom-ai">🔧 自定义 AI 接口</option>
           </select>
         </div>
       </div>
 
       <div id="ai-settings-group" class="settings-group" style="display: none;">
-        <h3>AI 智能配置</h3>
+        <h3>Gemini AI 配置</h3>
         <div class="setting-row column">
           <label for="setting-ai-key">Gemini API Key</label>
           <input type="password" id="setting-ai-key" placeholder="输入 API 密钥..." class="setting-input-text">
@@ -286,8 +333,44 @@ function injectSidebarDOM() {
         <p class="setting-help">使用 Gemini AI 翻译时，AI 将自动结合生词的上下文，在专业语境下输出极其精准的专业释义。</p>
       </div>
 
+      <div id="custom-ai-settings-group" class="settings-group" style="display: none;">
+        <h3>🔧 自定义 AI 接口</h3>
+        <div class="setting-row">
+          <label for="setting-custom-ai-preset">服务商预设</label>
+          <select id="setting-custom-ai-preset" class="setting-select">
+            <option value="">自定义</option>
+            <option value="deepseek">DeepSeek</option>
+            <option value="qwen">阿里百炼 (Qwen)</option>
+            <option value="moonshot">Moonshot (Kimi)</option>
+            <option value="openrouter">OpenRouter</option>
+            <option value="ollama">Ollama (本地)</option>
+          </select>
+        </div>
+        <div class="setting-row column">
+          <label for="setting-custom-ai-url">Base URL</label>
+          <input type="text" id="setting-custom-ai-url" placeholder="https://api.deepseek.com/v1" class="setting-input-text">
+        </div>
+        <div class="setting-row column">
+          <label for="setting-custom-ai-key">API Key</label>
+          <input type="password" id="setting-custom-ai-key" placeholder="sk-..." class="setting-input-text">
+        </div>
+        <div class="setting-row column">
+          <label for="setting-custom-ai-model">模型名称</label>
+          <input type="text" id="setting-custom-ai-model" placeholder="deepseek-chat" class="setting-input-text">
+        </div>
+        <div class="setting-row column">
+          <label for="setting-custom-ai-prompt">Prompt 模板</label>
+          <textarea id="setting-custom-ai-prompt" class="setting-textarea" rows="4" placeholder="使用 {word}, {context}, {targetLang} 作为占位符..."></textarea>
+        </div>
+        <div style="display: flex; align-items: center; gap: 10px; margin-top: 8px;">
+          <button id="btn-test-custom-ai" class="setting-btn">🔍 测试连接</button>
+          <span id="custom-ai-test-result" class="setting-help" style="margin: 0; font-weight: 600;"></span>
+        </div>
+        <p class="setting-help">使用 OpenAI 兼容格式（/v1/chat/completions），可对接 DeepSeek、Qwen、Moonshot、Ollama 等任意服务。</p>
+      </div>
+
       <div class="settings-group">
-        <h3>显示与主题</h3>
+        <h3>外观与主题色</h3>
         <div class="setting-row">
           <label for="setting-theme">界面主题</label>
           <select id="setting-theme" class="setting-select">
@@ -296,7 +379,23 @@ function injectSidebarDOM() {
             <option value="dark-all">暗黑护眼 (黑纸)</option>
           </select>
         </div>
-        <div class="setting-row" style="margin-top: 10px;">
+        <div style="margin-top: 14px;">
+          <label style="font-size: 12px; font-weight: 600; color: var(--text-sub); display: block; margin-bottom: 8px;">主题色调</label>
+          <div class="color-swatches" id="color-swatches">
+            <button class="color-swatch" data-hue="20" title="橙红 (默认)" style="background:hsl(20,75%,48%)" aria-label="橙红"></button>
+            <button class="color-swatch" data-hue="225" title="靛蓝" style="background:hsl(225,70%,50%)" aria-label="靛蓝"></button>
+            <button class="color-swatch" data-hue="152" title="翡翠绿" style="background:hsl(152,60%,40%)" aria-label="翡翠绿"></button>
+            <button class="color-swatch" data-hue="345" title="玫瑰红" style="background:hsl(345,72%,48%)" aria-label="玫瑰红"></button>
+            <button class="color-swatch" data-hue="195" title="青蓝" style="background:hsl(195,78%,42%)" aria-label="青蓝"></button>
+            <button class="color-swatch" data-hue="40" title="琥珀金" style="background:hsl(40,88%,45%)" aria-label="琥珀金"></button>
+            <button class="color-swatch" data-hue="270" title="紫罗兰" style="background:hsl(270,58%,50%)" aria-label="紫罗兰"></button>
+            <button class="color-swatch" data-hue="215" title="深蓝灰" style="background:hsl(215,32%,45%)" aria-label="深蓝灰"></button>
+          </div>
+          <div style="margin-top: 10px;">
+            <input type="range" id="setting-accent-hue" min="0" max="360" step="1" value="20" class="hue-slider" aria-label="自定义色相 0-360">
+          </div>
+        </div>
+        <div class="setting-row" style="margin-top: 12px;">
           <label for="setting-card-mode">卡片展示模式</label>
           <select id="setting-card-mode" class="setting-select">
             <option value="minimal">极简模式 (仅释义)</option>
@@ -304,6 +403,23 @@ function injectSidebarDOM() {
             <option value="full">完整模式 (展示来源及详情)</option>
           </select>
         </div>
+        <div class="setting-row" style="margin-top: 12px;">
+          <label>全屏阅读</label>
+          <button id="btn-toggle-fullscreen-setting" class="setting-btn">⛶ 进入全屏</button>
+        </div>
+        <p class="setting-help">全屏模式下将鼠标移至屏幕边缘可唤出边栏；缩放默认切换为适合页宽。按 Esc 或 F11 退出。</p>
+      </div>
+
+      <div class="settings-group">
+        <h3>启动行为</h3>
+        <div class="setting-row">
+          <label for="setting-startup-behavior">打开阅读器时</label>
+          <select id="setting-startup-behavior" class="setting-select">
+            <option value="library">进入书架界面</option>
+            <option value="reopen">重新打开上次文件</option>
+          </select>
+        </div>
+        <p class="setting-help">选择「进入书架」时，打开 ReadFlow（无文件参数）将跳转至书架。</p>
       </div>
 
       <div class="settings-group">
@@ -333,6 +449,14 @@ function injectSidebarDOM() {
   setAlwaysTranslate = document.getElementById('setting-always-translate');
   setToggleShortcutModifier = document.getElementById('setting-toggle-shortcut-modifier');
   setToggleShortcutKey = document.getElementById('setting-toggle-shortcut-key');
+  // v2.0 new elements
+  setAccentHue = document.getElementById('setting-accent-hue');
+  setStartupBehavior = document.getElementById('setting-startup-behavior');
+  setCustomAiBaseUrl = document.getElementById('setting-custom-ai-url');
+  setCustomAiKey = document.getElementById('setting-custom-ai-key');
+  setCustomAiModel = document.getElementById('setting-custom-ai-model');
+  setCustomAiPrompt = document.getElementById('setting-custom-ai-prompt');
+  customAiSettingsGroup = document.getElementById('custom-ai-settings-group');
 
   // Sync settings pane options
   setModifier.value = settings.modifierKey;
@@ -345,6 +469,14 @@ function injectSidebarDOM() {
   setAlwaysTranslate.checked = settings.alwaysTranslate || false;
   setToggleShortcutModifier.value = settings.toggleShortcutModifier || 'Alt';
   setToggleShortcutKey.value = (settings.toggleShortcutKey || 'b').toUpperCase();
+  if (setAccentHue) setAccentHue.value = settings.accentHue || 20;
+  if (setStartupBehavior) setStartupBehavior.value = settings.startupBehavior || 'library';
+  if (setCustomAiBaseUrl) setCustomAiBaseUrl.value = settings.customAiBaseUrl || '';
+  if (setCustomAiKey) setCustomAiKey.value = settings.customAiKey || '';
+  if (setCustomAiModel) setCustomAiModel.value = settings.customAiModel || 'deepseek-chat';
+  if (setCustomAiPrompt) setCustomAiPrompt.value = settings.customAiPrompt || '';
+  // Mark active swatch
+  updateSwatchActiveState(settings.accentHue || 20);
   toggleAiSettingsVisibility();
 }
 
@@ -369,6 +501,30 @@ function injectToolbarButton() {
   outerContainer.appendChild(btn);
   sidebarBadge = document.getElementById('sidebar-badge');
   updateBadgeCount();
+
+  // Inject fullscreen toggle floating button
+  const btnFs = document.createElement('button');
+  btnFs.id = 'btn-toggle-fullscreen';
+  btnFs.className = 'floating-fab-secondary';
+  btnFs.title = '全屏阅读模式';
+  btnFs.innerHTML = `
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="pointer-events: none;">
+      <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path>
+    </svg>
+  `;
+  outerContainer.appendChild(btnFs);
+
+  // Inject back-to-library floating button
+  const btnLib = document.createElement('button');
+  btnLib.id = 'btn-back-to-library';
+  btnLib.className = 'floating-fab-secondary';
+  btnLib.title = '返回书架';
+  btnLib.innerHTML = `
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="pointer-events: none;">
+      <path d="M19 12H5M12 19l-7-7 7-7"></path>
+    </svg>
+  `;
+  outerContainer.appendChild(btnLib);
 }
 
 // --- Setup Event Listeners ---
@@ -378,6 +534,24 @@ function setupExtensionEventListeners() {
   const btnClose = document.getElementById('btn-close-sidebar');
   if (btnToggle) btnToggle.addEventListener('click', toggleSidebar);
   if (btnClose) btnClose.addEventListener('click', toggleSidebar);
+
+  // Fullscreen button
+  const btnFs = document.getElementById('btn-toggle-fullscreen');
+  if (btnFs) btnFs.addEventListener('click', toggleFullscreenMode);
+  const btnFsSetting = document.getElementById('btn-toggle-fullscreen-setting');
+  if (btnFsSetting) btnFsSetting.addEventListener('click', toggleFullscreenMode);
+  document.addEventListener('fullscreenchange', onFullscreenChange);
+
+  // Back to library button
+  const btnLib = document.getElementById('btn-back-to-library');
+  if (btnLib) btnLib.addEventListener('click', async () => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const bookId = urlParams.get('bookId');
+    if (bookId && window.PDFViewerApplication) {
+      await saveLastReadPage(bookId, window.PDFViewerApplication.page);
+    }
+    window.location.href = chrome.runtime.getURL('library.html');
+  });
 
   // Docking controls
   const btnDockLeft = document.getElementById('btn-dock-left');
@@ -427,7 +601,66 @@ function setupExtensionEventListeners() {
       updateSettingField();
     });
   }
-  
+
+  // v2.0: Accent color — swatch buttons
+  document.addEventListener('click', (e) => {
+    const swatch = e.target.closest('.color-swatch');
+    if (swatch) {
+      const hue = parseInt(swatch.dataset.hue);
+      settings.accentHue = hue;
+      if (setAccentHue) setAccentHue.value = hue;
+      applyAccentColor(hue, settings.accentSaturation);
+      updateSwatchActiveState(hue);
+      chrome.storage.local.set({ settings });
+    }
+  });
+
+  // v2.0: Accent hue slider
+  if (setAccentHue) {
+    setAccentHue.addEventListener('input', () => {
+      const hue = parseInt(setAccentHue.value);
+      settings.accentHue = hue;
+      applyAccentColor(hue, settings.accentSaturation);
+      updateSwatchActiveState(hue);
+    });
+    setAccentHue.addEventListener('change', () => { chrome.storage.local.set({ settings }); });
+  }
+
+  // v2.0: Startup behavior
+  if (setStartupBehavior) setStartupBehavior.addEventListener('change', updateSettingField);
+
+  // v2.0: Custom AI preset auto-fill
+  const presetSelect = document.getElementById('setting-custom-ai-preset');
+  if (presetSelect) {
+    presetSelect.addEventListener('change', () => {
+      const presets = {
+        deepseek: { url: 'https://api.deepseek.com/v1', model: 'deepseek-chat' },
+        qwen:     { url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-plus' },
+        moonshot: { url: 'https://api.moonshot.cn/v1', model: 'moonshot-v1-8k' },
+        openrouter:{ url: 'https://openrouter.ai/api/v1', model: 'openai/gpt-4o-mini' },
+        ollama:   { url: 'http://localhost:11434/v1', model: 'llama3' },
+      };
+      const p = presets[presetSelect.value];
+      if (p) {
+        if (setCustomAiBaseUrl) setCustomAiBaseUrl.value = p.url;
+        if (setCustomAiModel) setCustomAiModel.value = p.model;
+        settings.customAiBaseUrl = p.url;
+        settings.customAiModel = p.model;
+        chrome.storage.local.set({ settings });
+      }
+    });
+  }
+
+  // v2.0: Custom AI fields
+  if (setCustomAiBaseUrl) setCustomAiBaseUrl.addEventListener('change', updateSettingField);
+  if (setCustomAiKey) setCustomAiKey.addEventListener('change', updateSettingField);
+  if (setCustomAiModel) setCustomAiModel.addEventListener('change', updateSettingField);
+  if (setCustomAiPrompt) setCustomAiPrompt.addEventListener('change', updateSettingField);
+
+  // v2.0: Test custom AI connection
+  const btnTestAi = document.getElementById('btn-test-custom-ai');
+  if (btnTestAi) btnTestAi.addEventListener('click', testCustomAiConnection);
+
   const btnClear = document.getElementById('btn-clear-db');
   if (btnClear) btnClear.addEventListener('click', clearEntireDatabase);
 
@@ -748,11 +981,9 @@ function switchTab(tab) {
 }
 
 function toggleAiSettingsVisibility() {
-  if (settings.translationProvider === 'gemini') {
-    aiSettingsGroup.style.display = 'block';
-  } else {
-    aiSettingsGroup.style.display = 'none';
-  }
+  const provider = settings.translationProvider;
+  if (aiSettingsGroup) aiSettingsGroup.style.display = (provider === 'gemini') ? 'block' : 'none';
+  if (customAiSettingsGroup) customAiSettingsGroup.style.display = (provider === 'custom-ai') ? 'block' : 'none';
 }
 
 function updateSettingField() {
@@ -765,6 +996,12 @@ function updateSettingField() {
   if (setTheme) settings.theme = setTheme.value;
   if (setAlwaysTranslate) settings.alwaysTranslate = setAlwaysTranslate.checked;
   if (setToggleShortcutModifier) settings.toggleShortcutModifier = setToggleShortcutModifier.value;
+  // v2.0 new fields
+  if (setStartupBehavior) settings.startupBehavior = setStartupBehavior.value;
+  if (setCustomAiBaseUrl) settings.customAiBaseUrl = setCustomAiBaseUrl.value;
+  if (setCustomAiKey) settings.customAiKey = setCustomAiKey.value;
+  if (setCustomAiModel) settings.customAiModel = setCustomAiModel.value;
+  if (setCustomAiPrompt) settings.customAiPrompt = setCustomAiPrompt.value;
 
   chrome.storage.local.set({ settings });
   applyTheme();
@@ -932,7 +1169,7 @@ function getContextSentence(fullText, startOffset, wordLength) {
 // --- Translation Engine ---
 async function translateWord(word, context) {
   const provider = settings.translationProvider;
-  
+
   if (provider === 'google') {
     return await translateGoogle(word);
   } else if (provider === 'dictionary') {
@@ -946,10 +1183,13 @@ async function translateWord(word, context) {
       return await translateGoogle(word);
     }
   } else if (provider === 'gemini') {
-    if (!settings.geminiApiKey) {
-      throw new Error('AI API Key is missing.');
-    }
+    if (!settings.geminiApiKey) throw new Error('AI API Key is missing.');
     return await translateGemini(word, context);
+  } else if (provider === 'custom-ai') {
+    if (!settings.customAiBaseUrl || !settings.customAiKey) {
+      throw new Error('\u81ea\u5b9a\u4e49 AI \u672a\u914d\u7f6e URL \u6216 API Key');
+    }
+    return await translateCustomAI(word, context);
   }
   return await translateGoogle(word);
 }
@@ -1622,87 +1862,97 @@ function applyTheme() {
   const theme = settings.theme || 'light';
   const outer = document.getElementById('outerContainer');
   if (!outer) return;
-  
+
   if (theme === 'light') {
     outer.setAttribute('data-theme', 'light');
   } else {
     outer.setAttribute('data-theme', 'dark');
   }
-  
+
   const viewer = document.getElementById('viewer');
   if (viewer) {
     viewer.classList.toggle('invert-pages', theme === 'dark-all');
   }
+
+  // Apply accent color
+  applyAccentColor(settings.accentHue, settings.accentSaturation);
 }
 
 // --- Welcome Screen Overlay Loader ---
 function initWelcomeOverlay() {
   const urlParams = new URLSearchParams(window.location.search);
   const hasFile = urlParams.has('file');
-  
+
   if (!hasFile) {
-    if (document.getElementById('readflow-welcome-overlay')) return;
-    
-    const overlay = document.createElement('div');
-    overlay.id = 'readflow-welcome-overlay';
-    overlay.innerHTML = `
-      <div class="welcome-card">
-        <div class="welcome-title">ReadFlow PDF 阅读器</div>
-        <div class="welcome-subtitle">开始您的顺流阅读之旅，双击词汇即刻翻译并记录。</div>
-        
-        <div id="welcome-dropzone" class="welcome-dropzone">
-          <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-            <polyline points="17 8 12 3 7 8"></polyline>
-            <line x1="12" y1="3" x2="12" y2="15"></line>
-          </svg>
-          <span>拖拽 PDF 文件到此处</span>
-          <p>或者点击区域浏览本地文件</p>
-        </div>
+    // Check startup behavior: redirect to library if set
+    const startupBehavior = settings.startupBehavior || 'library';
+    if (startupBehavior === 'library') {
+      window.location.href = chrome.runtime.getURL('library.html');
+      return;
+    }
+
+    // 'reopen' behavior: show welcome overlay with library shortcut
+    showStandardWelcomeOverlay();
+  }
+}
+
+function showStandardWelcomeOverlay() {
+  if (document.getElementById('readflow-welcome-overlay')) return;
+
+  const overlay = document.createElement('div');
+  overlay.id = 'readflow-welcome-overlay';
+  overlay.innerHTML = `
+    <div class="welcome-card">
+      <div class="welcome-title">ReadFlow PDF \u9605\u8bfb\u5668</div>
+      <div class="welcome-subtitle">\u5f00\u59cb\u60a8\u7684\u987a\u6d41\u9605\u8bfb\u4e4b\u65c5\uff0c\u53cc\u51fb\u8bcd\u6c47\u5373\u523b\u7ffb\u8bd1\u5e76\u8bb0\u5f55\u3002</div>
+      <button id="welcome-goto-library" class="welcome-library-btn">
+        \ud83d\udcda \u524d\u5f80\u4e66\u67b6
+      </button>
+      <div id="welcome-dropzone" class="welcome-dropzone">
+        <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+          <polyline points="17 8 12 3 7 8"></polyline>
+          <line x1="12" y1="3" x2="12" y2="15"></line>
+        </svg>
+        <span>\u62d6\u62fd PDF \u6587\u4ef6\u5230\u6b64\u5904</span>
+        <p>\u6216\u8005\u70b9\u51fb\u533a\u57df\u6d4f\u89c8\u672c\u5730\u6587\u4ef6</p>
       </div>
-    `;
-    
-    const outerContainer = document.getElementById('outerContainer');
-    if (outerContainer) {
-      outerContainer.appendChild(overlay);
-    }
-    
-    const dropzone = document.getElementById('welcome-dropzone');
-    if (dropzone) {
-      dropzone.addEventListener('click', () => {
-        const fileInput = document.getElementById('fileInput');
-        if (fileInput) fileInput.click();
-      });
-      
-      dropzone.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        dropzone.classList.add('drag-over');
-      });
-      
-      dropzone.addEventListener('dragleave', () => {
-        dropzone.classList.remove('drag-over');
-      });
-      
-      dropzone.addEventListener('drop', (e) => {
-        e.preventDefault();
-        dropzone.classList.remove('drag-over');
-        
-        const files = e.dataTransfer.files;
-        if (files && files.length > 0) {
-          const file = files[0];
-          if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
-            if (window.PDFViewerApplication) {
-              window.PDFViewerApplication.open({
-                url: URL.createObjectURL(file),
-                originalUrl: file.name
-              });
-            }
-          } else {
-            alert('请选择有效的 PDF 文件！');
+    </div>
+  `;
+
+  const outerContainer = document.getElementById('outerContainer');
+  if (outerContainer) outerContainer.appendChild(overlay);
+
+  document.getElementById('welcome-goto-library')?.addEventListener('click', () => {
+    window.location.href = chrome.runtime.getURL('library.html');
+  });
+
+  const dropzone = document.getElementById('welcome-dropzone');
+  if (dropzone) {
+    dropzone.addEventListener('click', () => {
+      const fileInput = document.getElementById('fileInput');
+      if (fileInput) fileInput.click();
+    });
+    dropzone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropzone.classList.add('drag-over');
+    });
+    dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag-over'));
+    dropzone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropzone.classList.remove('drag-over');
+      const files = e.dataTransfer.files;
+      if (files && files.length > 0) {
+        const file = files[0];
+        if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+          if (window.PDFViewerApplication) {
+            window.PDFViewerApplication.open({ url: URL.createObjectURL(file), originalUrl: file.name });
           }
+        } else {
+          alert('\u8bf7\u9009\u62e9\u6709\u6548\u7684 PDF \u6587\u4ef6\uff01');
         }
-      });
-    }
+      }
+    });
   }
 }
 
@@ -1766,3 +2016,261 @@ function showSystemToast(message) {
     }, 300);
   }, 2500);
 }
+
+// --- v2.0: Accent Color ---
+function applyAccentColor(hue, saturation) {
+  if (hue === undefined || hue === null) return;
+  const h = hue;
+  const s = saturation || 75;
+  const root = document.getElementById('outerContainer') || document.documentElement;
+  root.style.setProperty('--primary', `hsl(${h}, ${s}%, 42%)`);
+  root.style.setProperty('--primary-light', `hsl(${h}, ${s}%, 55%)`);
+  root.style.setProperty('--primary-gradient',
+    `linear-gradient(135deg, hsl(${h}, ${s}%, 38%) 0%, hsl(${h}, ${s + 5}%, 52%) 100%)`);
+  root.style.setProperty('--primary-subtle', `hsla(${h}, ${s}%, 50%, 0.08)`);
+}
+
+function updateSwatchActiveState(activeHue) {
+  document.querySelectorAll('.color-swatch').forEach(sw => {
+    const h = parseInt(sw.dataset.hue);
+    sw.classList.toggle('active', Math.abs(h - activeHue) < 3);
+  });
+}
+
+// --- v2.0: Fullscreen Mode ---
+let _fsEdgeHandler = null;
+
+function toggleFullscreenMode() {
+  if (!document.fullscreenElement) {
+    document.documentElement.requestFullscreen().then(() => {
+      // In fullscreen: switch to page-width zoom by default
+      if (window.PDFViewerApplication && window.PDFViewerApplication.pdfViewer) {
+        window.PDFViewerApplication.pdfViewer.currentScaleValue = 'page-width';
+      }
+    }).catch(err => {
+      console.warn('[ReadFlow] Fullscreen request failed:', err);
+    });
+  } else {
+    document.exitFullscreen();
+  }
+}
+
+function onFullscreenChange() {
+  const isFs = !!document.fullscreenElement;
+  const outer = document.getElementById('outerContainer');
+  if (outer) outer.classList.toggle('readflow-fullscreen', isFs);
+
+  // Update toolbar button icon (both in FAB and in settings if it exists)
+  const btnFs = document.getElementById('btn-toggle-fullscreen');
+  const btnFsSetting = document.getElementById('btn-toggle-fullscreen-setting');
+  const fsLabel = isFs ? '退出全屏' : '全屏阅读模式';
+  const fsBtnText = isFs ? '⛶ 退出全屏' : '⛶ 进入全屏';
+
+  if (btnFs) {
+    btnFs.title = fsLabel;
+    btnFs.innerHTML = isFs
+      ? `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="pointer-events:none"><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"></path></svg>`
+      : `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="pointer-events:none"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path></svg>`;
+  }
+  if (btnFsSetting) {
+    btnFsSetting.textContent = fsBtnText;
+  }
+
+  // Edge hover: reveal sidebars and toolbar in fullscreen
+  if (isFs) {
+    _fsEdgeHandler = (e) => {
+      const sb = document.getElementById('sidebar');
+      const sbc = document.getElementById('sidebarContainer');
+      const tb = document.getElementById('toolbarContainer');
+      const fabToggle = document.getElementById('btn-toggle-sidebar');
+      const fabFs = document.getElementById('btn-toggle-fullscreen');
+      const fabLib = document.getElementById('btn-back-to-library');
+
+      // 1. Top toolbar hover (within 48px of top or when mouse is inside toolbar)
+      const atTop = e.clientY < 48;
+      if (tb) {
+        tb.classList.toggle('show-toolbar', atTop);
+      }
+
+      // 2. Left sidebar hover (within 40px of left)
+      const atLeftEdge = e.clientX < 40;
+      if (sbc) {
+        sbc.classList.toggle('reveal-left', atLeftEdge);
+      }
+
+      // 3. Right sidebar hover (within 40px of right)
+      const atRightEdge = e.clientX > window.innerWidth - 40;
+      if (sb && settings.sidebarOpen) {
+        sb.classList.toggle('reveal-right', atRightEdge);
+      }
+
+      // 4. FAB opacity fade in fullscreen
+      const nearAnyFab = (e.clientX > window.innerWidth - 80 && e.clientY > window.innerHeight - 220);
+      const fabs = [fabToggle, fabFs, fabLib];
+      fabs.forEach(f => {
+        if (f) {
+          f.style.opacity = (nearAnyFab || atRightEdge) ? '1' : '0.15';
+        }
+      });
+    };
+    document.addEventListener('mousemove', _fsEdgeHandler);
+  } else {
+    if (_fsEdgeHandler) {
+      document.removeEventListener('mousemove', _fsEdgeHandler);
+      _fsEdgeHandler = null;
+    }
+    // Restore layout styles
+    const sb = document.getElementById('sidebar');
+    const sbc = document.getElementById('sidebarContainer');
+    const tb = document.getElementById('toolbarContainer');
+    const fabToggle = document.getElementById('btn-toggle-sidebar');
+    const fabFs = document.getElementById('btn-toggle-fullscreen');
+    const fabLib = document.getElementById('btn-back-to-library');
+
+    if (sb) { sb.classList.remove('reveal-right'); }
+    if (sbc) { sbc.classList.remove('reveal-left'); }
+    if (tb) { tb.classList.remove('show-toolbar'); }
+    
+    const fabs = [fabToggle, fabFs, fabLib];
+    fabs.forEach(f => { if (f) f.style.opacity = ''; });
+  }
+}
+
+// --- v2.0: Custom AI Translation ---
+async function translateCustomAI(word, context) {
+  const baseUrl = settings.customAiBaseUrl.replace(/\/$/, '');
+  const apiKey = settings.customAiKey;
+  const model = settings.customAiModel || 'deepseek-chat';
+  const targetLangName = LANG_NAMES[settings.targetLang] || 'Chinese (Simplified)';
+
+  // Build prompt from template or use default
+  const promptTemplate = settings.customAiPrompt ||
+    'Translate "{word}" into {targetLang}. Context: "{context}". Provide a concise dictionary-style translation only.';
+  const prompt = promptTemplate
+    .replace(/{word}/g, word)
+    .replace(/{context}/g, context || '')
+    .replace(/{targetLang}/g, targetLangName);
+
+  const response = await fetch(`${baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      messages: [{ role: 'user', content: prompt }],
+      max_tokens: 256,
+      temperature: 0.3,
+    }),
+  });
+
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData.error?.message || `HTTP ${response.status}`);
+  }
+
+  const data = await response.json();
+  const translation = data.choices?.[0]?.message?.content?.trim() || '';
+  return { translation, phonetic: '' };
+}
+
+async function testCustomAiConnection() {
+  const resultEl = document.getElementById('custom-ai-test-result');
+  const btnTest = document.getElementById('btn-test-custom-ai');
+  if (!resultEl || !btnTest) return;
+
+  const baseUrl = (setCustomAiBaseUrl?.value || '').replace(/\/$/, '');
+  const apiKey = setCustomAiKey?.value || '';
+  const model = setCustomAiModel?.value || 'deepseek-chat';
+
+  if (!baseUrl || !apiKey) {
+    resultEl.textContent = '\u26a0\ufe0f \u8bf7\u5148\u586b\u5199 URL \u548c API Key';
+    resultEl.style.color = 'var(--danger)';
+    return;
+  }
+
+  btnTest.disabled = true;
+  btnTest.textContent = '\u6d4b\u8bd5\u4e2d...';
+  resultEl.textContent = '';
+
+  try {
+    const response = await fetch(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'user', content: 'Reply with the single word: OK' }],
+        max_tokens: 10,
+        temperature: 0,
+      }),
+    });
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error?.message || `HTTP ${response.status}`);
+    }
+
+    const data = await response.json();
+    const reply = data.choices?.[0]?.message?.content?.trim();
+    resultEl.textContent = `\u2705 \u8fde\u63a5\u6210\u529f\uff01\u6a21\u578b\u56de\u590d: "${reply}"`;
+    resultEl.style.color = 'var(--success, #16a34a)';
+  } catch (e) {
+    resultEl.textContent = `\u274c \u5931\u8d25: ${e.message}`;
+    resultEl.style.color = 'var(--danger)';
+  } finally {
+    btnTest.disabled = false;
+    btnTest.textContent = '\ud83d\udd0d \u6d4b\u8bd5\u8fde\u63a5';
+  }
+}
+
+// --- IndexedDB for Library Sync ---
+const LIB_DB_NAME = 'readflow_library_v2';
+const LIB_STORE_NAME = 'files';
+
+function openLibraryDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(LIB_DB_NAME, 1);
+    req.onupgradeneeded = (e) => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains(LIB_STORE_NAME)) {
+        const store = db.createObjectStore(LIB_STORE_NAME, { keyPath: 'id' });
+        store.createIndex('lastOpenedAt', 'lastOpenedAt', { unique: false });
+      }
+    };
+    req.onsuccess = (e) => resolve(e.target.result);
+    req.onerror = (e) => reject(e.target.error);
+  });
+}
+
+async function saveLastReadPage(bookId, pageNum) {
+  if (!bookId) return;
+  try {
+    const db = await openLibraryDB();
+    const tx = db.transaction(LIB_STORE_NAME, 'readwrite');
+    const store = tx.objectStore(LIB_STORE_NAME);
+    
+    // Get entry first
+    const entry = await new Promise((resolve, reject) => {
+      const getReq = store.get(bookId);
+      getReq.onsuccess = () => resolve(getReq.result);
+      getReq.onerror = () => reject(getReq.error);
+    });
+    
+    if (entry) {
+      entry.lastReadPage = pageNum;
+      entry.lastOpenedAt = Date.now();
+      await new Promise((resolve, reject) => {
+        const putReq = store.put(entry);
+        putReq.onsuccess = () => resolve();
+        putReq.onerror = () => reject(putReq.error);
+      });
+    }
+  } catch (err) {
+    console.error('[ReadFlow] Failed to save last read page:', err);
+  }
+}
+
