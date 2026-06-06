@@ -51,7 +51,7 @@
 
 1. 下载或通过 `git clone` 本仓库代码至本地：
    ```bash
-   git clone https://github.com/您的用户名/PDF_Plugin.git
+   git clone https://github.com/Littledogewww/PDF_Plugin.git
    ```
 2. 打开 Google Chrome 或其他 Chromium 内核浏览器（如 Edge）。
 3. 在地址栏输入 `chrome://extensions/` 打开 **扩展程序** 页面。
