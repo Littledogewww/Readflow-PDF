@@ -25,6 +25,9 @@ let settings = {
   customAiKey: '',
   customAiModel: 'deepseek-chat',
   customAiPrompt: 'You are a professional academic translator and contextual dictionary.\nTranslate the term "{word}" from its academic context into {targetLang}.\n\nContext sentence: "{context}"\n\nRules:\n1. Provide the most precise translation that fits the academic/technical context\n2. If it is an English term, also provide: [part of speech] phonetic (if applicable)\n3. Add a brief academic definition (1 sentence max)\n4. Format: Translation | [optional: phonetic] | [optional: definition]\n5. Response must be concise, dictionary-style. No markdown, no extra explanation.',
+  // v2.1 new fields
+  bgStyle: 'solid',
+  accentHueEnd: 200,
 };
 let toastTimeout = null;
 
@@ -65,6 +68,11 @@ let setCustomAiKey = null;
 let setCustomAiModel = null;
 let setCustomAiPrompt = null;
 let customAiSettingsGroup = null;
+// v2.1 new elements
+let setBgStyle = null;
+let setAccentHueEnd = null;
+let customColorSettingsSubgroup = null;
+let settingAccentHueEndRow = null;
 
 // --- Initialize when DOM is loaded ---
 document.addEventListener('DOMContentLoaded', async () => {
@@ -384,7 +392,21 @@ function injectSidebarDOM() {
             <option value="light">明亮纸张</option>
             <option value="dark-ui">暗黑界面 (白纸)</option>
             <option value="dark-all">暗黑护眼 (黑纸)</option>
+            <option value="custom">🎨 自定义色彩主题</option>
           </select>
+        </div>
+        <div id="custom-color-settings-subgroup" style="display: none; margin-top: 10px; border-left: 2px solid var(--primary); padding-left: 10px;">
+          <div class="setting-row">
+            <label for="setting-bg-style">背景类型</label>
+            <select id="setting-bg-style" class="setting-select">
+              <option value="solid">单色背景</option>
+              <option value="gradient">渐变背景</option>
+            </select>
+          </div>
+          <div id="setting-accent-hue-end-row" class="setting-row" style="display: none; margin-top: 10px; flex-direction: column; align-items: stretch; gap: 4px;">
+            <label for="setting-accent-hue-end" style="align-self: flex-start;">渐变结束色相</label>
+            <input type="range" id="setting-accent-hue-end" min="0" max="360" step="1" value="200" class="hue-slider" aria-label="自定义结束色相 0-360">
+          </div>
         </div>
         <div style="margin-top: 14px;">
           <label style="font-size: 12px; font-weight: 600; color: var(--text-sub); display: block; margin-bottom: 8px;">主题色调</label>
@@ -464,6 +486,11 @@ function injectSidebarDOM() {
   setCustomAiModel = document.getElementById('setting-custom-ai-model');
   setCustomAiPrompt = document.getElementById('setting-custom-ai-prompt');
   customAiSettingsGroup = document.getElementById('custom-ai-settings-group');
+  // v2.1 new elements
+  setBgStyle = document.getElementById('setting-bg-style');
+  setAccentHueEnd = document.getElementById('setting-accent-hue-end');
+  customColorSettingsSubgroup = document.getElementById('custom-color-settings-subgroup');
+  settingAccentHueEndRow = document.getElementById('setting-accent-hue-end-row');
 
   // Sync settings pane options
   setModifier.value = settings.modifierKey;
@@ -482,9 +509,12 @@ function injectSidebarDOM() {
   if (setCustomAiKey) setCustomAiKey.value = settings.customAiKey || '';
   if (setCustomAiModel) setCustomAiModel.value = settings.customAiModel || 'deepseek-chat';
   if (setCustomAiPrompt) setCustomAiPrompt.value = settings.customAiPrompt || '';
+  if (setBgStyle) setBgStyle.value = settings.bgStyle || 'solid';
+  if (setAccentHueEnd) setAccentHueEnd.value = settings.accentHueEnd || 200;
   // Mark active swatch
   updateSwatchActiveState(settings.accentHue || 20);
   toggleAiSettingsVisibility();
+  toggleCustomColorSettingsVisibility();
 }
 
 function injectToolbarButton() {
@@ -595,7 +625,18 @@ function setupExtensionEventListeners() {
     updateSettingField();
     renderSidebarVocabList();
   });
-  if (setTheme) setTheme.addEventListener('change', updateSettingField);
+  if (setTheme) {
+    setTheme.addEventListener('change', () => {
+      updateSettingField();
+      toggleCustomColorSettingsVisibility();
+    });
+  }
+  if (setBgStyle) {
+    setBgStyle.addEventListener('change', () => {
+      updateSettingField();
+      toggleCustomColorSettingsVisibility();
+    });
+  }
   if (setAlwaysTranslate) setAlwaysTranslate.addEventListener('change', updateSettingField);
   if (setToggleShortcutModifier) setToggleShortcutModifier.addEventListener('change', updateSettingField);
   if (setToggleShortcutKey) {
@@ -631,6 +672,16 @@ function setupExtensionEventListeners() {
       updateSwatchActiveState(hue);
     });
     setAccentHue.addEventListener('change', () => { chrome.storage.local.set({ settings }); });
+  }
+
+  // v2.1: Accent hue end slider
+  if (setAccentHueEnd) {
+    setAccentHueEnd.addEventListener('input', () => {
+      const hue = parseInt(setAccentHueEnd.value);
+      settings.accentHueEnd = hue;
+      applyAccentColor(settings.accentHue, settings.accentSaturation);
+    });
+    setAccentHueEnd.addEventListener('change', () => { chrome.storage.local.set({ settings }); });
   }
 
   // v2.0: Startup behavior
@@ -1063,9 +1114,22 @@ function updateSettingField() {
   if (setCustomAiKey) settings.customAiKey = setCustomAiKey.value;
   if (setCustomAiModel) settings.customAiModel = setCustomAiModel.value;
   if (setCustomAiPrompt) settings.customAiPrompt = setCustomAiPrompt.value;
+  // v2.1 new fields
+  if (setBgStyle) settings.bgStyle = setBgStyle.value;
+  if (setAccentHueEnd) settings.accentHueEnd = parseInt(setAccentHueEnd.value);
 
   chrome.storage.local.set({ settings });
   applyTheme();
+}
+
+function toggleCustomColorSettingsVisibility() {
+  const isCustomTheme = settings.theme === 'custom';
+  if (customColorSettingsSubgroup) {
+    customColorSettingsSubgroup.style.display = isCustomTheme ? 'block' : 'none';
+  }
+  if (settingAccentHueEndRow) {
+    settingAccentHueEndRow.style.display = (isCustomTheme && settings.bgStyle === 'gradient') ? 'flex' : 'none';
+  }
 }
 
 // --- Text Selection & Offsets Logic ---
@@ -1926,6 +1990,8 @@ function applyTheme() {
 
   if (theme === 'light') {
     outer.setAttribute('data-theme', 'light');
+  } else if (theme === 'custom') {
+    outer.setAttribute('data-theme', 'custom');
   } else {
     outer.setAttribute('data-theme', 'dark');
   }
@@ -2090,6 +2156,32 @@ function applyAccentColor(hue, saturation) {
   root.style.setProperty('--primary-gradient',
     `linear-gradient(135deg, hsl(${h}, ${s}%, 38%) 0%, hsl(${h}, ${s + 5}%, 52%) 100%)`);
   root.style.setProperty('--primary-subtle', `hsla(${h}, ${s}%, 50%, 0.08)`);
+
+  // Apply custom theme background colors if custom theme is active
+  if (settings.theme === 'custom') {
+    const isGradient = settings.bgStyle === 'gradient';
+    const hEnd = settings.accentHueEnd !== undefined ? settings.accentHueEnd : 200;
+    
+    // Soft Kindle-like background (saturation 28%, lightness 92%)
+    const bgVal = isGradient
+      ? `linear-gradient(135deg, hsl(${h}, 28%, 92%) 0%, hsl(${hEnd}, 28%, 92%) 100%)`
+      : `hsl(${h}, 28%, 92%)`;
+    
+    const bgHeaderVal = `rgba(255, 255, 255, 0.45)`;
+    const bgSidebarVal = `rgba(255, 255, 255, 0.55)`;
+    const bgCardVal = `rgba(255, 255, 255, 0.75)`;
+    const bgCardHoverVal = `rgba(255, 255, 255, 0.9)`;
+    const borderVal = `hsla(${h}, 20%, 75%, 0.4)`;
+    const borderStrongVal = `hsla(${h}, 20%, 65%, 0.6)`;
+    
+    root.style.setProperty('--custom-bg-app', bgVal);
+    root.style.setProperty('--custom-bg-workspace', 'transparent');
+    root.style.setProperty('--custom-bg-sidebar', bgSidebarVal);
+    root.style.setProperty('--custom-bg-card', bgCardVal);
+    root.style.setProperty('--custom-bg-card-hover', bgCardHoverVal);
+    root.style.setProperty('--custom-border', borderVal);
+    root.style.setProperty('--custom-border-strong', borderStrongVal);
+  }
 }
 
 function updateSwatchActiveState(activeHue) {

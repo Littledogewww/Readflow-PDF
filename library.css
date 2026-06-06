@@ -983,3 +983,93 @@ body {
   color: var(--primary);
 }
 
+/* --- Custom Color Theme Overrides for Library --- */
+[data-theme="custom"] {
+  --bg-app: var(--custom-bg-app);
+  --bg-header: var(--custom-bg-header);
+  --bg-card: var(--custom-bg-card);
+  --bg-card-hover: var(--custom-bg-card-hover);
+  --bg-dropzone: var(--custom-bg-dropzone);
+  --text-main: #1a2230;
+  --text-sub: #4a5568;
+  --text-muted: #718096;
+  --border: var(--custom-border);
+  --border-strong: var(--custom-border-strong);
+}
+
+[data-theme="custom"] body {
+  background: var(--custom-bg-app) !important;
+  background-attachment: fixed !important;
+}
+
+[data-theme="custom"] .lib-header {
+  background: var(--custom-bg-header) !important;
+  backdrop-filter: blur(20px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
+  border-bottom: 1px solid var(--border) !important;
+}
+
+[data-theme="custom"] .lib-search {
+  background: rgba(255, 255, 255, 0.8) !important;
+  border-color: var(--border) !important;
+  color: var(--text-main) !important;
+}
+
+[data-theme="custom"] .lib-search:focus {
+  background: #ffffff !important;
+  border-color: var(--primary) !important;
+  box-shadow: 0 0 0 3px var(--primary-subtle) !important;
+}
+
+[data-theme="custom"] .book-card {
+  background-color: var(--bg-card) !important;
+  border: 1px solid var(--border) !important;
+}
+
+[data-theme="custom"] .book-card:hover {
+  background-color: var(--bg-card-hover) !important;
+  border-color: var(--primary) !important;
+}
+
+[data-theme="custom"] .ctx-menu {
+  background-color: var(--bg-card) !important;
+  border: 1px solid var(--border) !important;
+  box-shadow: var(--shadow-md) !important;
+}
+
+[data-theme="custom"] .ctx-item {
+  color: var(--text-main) !important;
+}
+
+[data-theme="custom"] .ctx-item:hover {
+  background-color: var(--primary-subtle) !important;
+  color: var(--primary) !important;
+}
+
+[data-theme="custom"] .lib-drawer-content {
+  background: var(--custom-bg-sidebar) !important;
+  backdrop-filter: blur(20px) !important;
+  -webkit-backdrop-filter: blur(20px) !important;
+  border-left: 1px solid var(--custom-border) !important;
+}
+
+[data-theme="custom"] .lib-drawer-body .setting-select,
+[data-theme="custom"] .lib-drawer-body .setting-input-text,
+[data-theme="custom"] .lib-drawer-body .setting-textarea {
+  background-color: rgba(255, 255, 255, 0.8) !important;
+  border-color: var(--custom-border) !important;
+  color: var(--text-main) !important;
+}
+
+[data-theme="custom"] .lib-drawer-body .setting-btn {
+  background-color: rgba(255, 255, 255, 0.8) !important;
+  border-color: var(--custom-border) !important;
+  color: var(--text-main) !important;
+}
+
+[data-theme="custom"] .lib-drawer-body .setting-btn:hover {
+  background-color: var(--primary-subtle) !important;
+  border-color: var(--primary) !important;
+  color: var(--primary) !important;
+}
+

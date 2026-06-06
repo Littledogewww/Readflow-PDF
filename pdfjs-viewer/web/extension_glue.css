@@ -1614,3 +1614,239 @@
   color: var(--primary) !important;
 }
 
+/* --- Custom Color Theme Background Overrides --- */
+[data-theme="custom"] {
+  --bg-app: var(--custom-bg-app);
+  --bg-workspace: var(--custom-bg-workspace);
+  --bg-sidebar: var(--custom-bg-sidebar);
+  --bg-card: var(--custom-bg-card);
+  --bg-card-hover: var(--custom-bg-card-hover);
+  --border: var(--custom-border);
+  --border-strong: var(--custom-border-strong);
+  
+  --text-main: #1a2230;       /* High-contrast charcoal text */
+  --text-muted: #5a6678;      /* Muted text */
+  --text-inverse: #ffffff;
+  
+  --scrollbar-thumb: rgba(90, 102, 120, 0.25);
+  --scrollbar-thumb-hover: var(--primary);
+  --scrollbar-color: rgba(90, 102, 120, 0.25) !important;
+  
+  /* PDF.js native overrides for custom color mode */
+  --toolbar-icon-bg-color: #2d3748 !important; /* charcoal grey icons */
+  --toolbar-icon-hover-bg-color: var(--primary) !important;
+  --toolbar-icon-opacity: 0.9 !important;
+  --doorhanger-icon-opacity: 0.9 !important;
+  --button-hover-color: var(--primary-subtle) !important;
+  --doorhanger-hover-bg-color: var(--primary-subtle) !important;
+  --toggled-btn-bg-color: rgba(211, 84, 0, 0.12) !important;
+  --toggled-btn-color: var(--primary) !important;
+  --separator-color: var(--custom-border) !important;
+  --doorhanger-separator-color: var(--custom-border) !important;
+}
+
+/* Glassmorphism for toolbar and sidebars in custom theme */
+[data-theme="custom"] #sidebar {
+  background-color: var(--custom-bg-sidebar) !important;
+  backdrop-filter: blur(20px) !important;
+  -webkit-backdrop-filter: blur(20px) !important;
+}
+
+[data-theme="custom"] #sidebarContainer {
+  background-color: var(--custom-bg-sidebar) !important;
+  backdrop-filter: blur(20px) !important;
+  -webkit-backdrop-filter: blur(20px) !important;
+}
+
+[data-theme="custom"] #sidebarContent {
+  background-color: transparent !important;
+}
+
+[data-theme="custom"] #toolbarSidebar {
+  background-color: transparent !important;
+}
+
+[data-theme="custom"] .toolbar, 
+[data-theme="custom"] #toolbarContainer {
+  background: var(--custom-bg-sidebar) !important;
+  backdrop-filter: blur(20px) !important;
+  -webkit-backdrop-filter: blur(20px) !important;
+}
+
+[data-theme="custom"] #scaleSelect {
+  background-color: rgba(255, 255, 255, 0.8) !important;
+  border-color: var(--border) !important;
+  color: var(--text-main) !important;
+}
+
+[data-theme="custom"] #pageNumber {
+  background-color: rgba(255, 255, 255, 0.8) !important;
+  border-color: var(--border) !important;
+  color: var(--text-main) !important;
+}
+
+[data-theme="custom"] .setting-select,
+[data-theme="custom"] .setting-input-text,
+[data-theme="custom"] .filter-select,
+[data-theme="custom"] .search-input {
+  background-color: rgba(255, 255, 255, 0.8) !important;
+  border-color: var(--border) !important;
+  color: var(--text-main) !important;
+}
+
+[data-theme="custom"] .sidebar-footer {
+  background-color: rgba(255, 255, 255, 0.4) !important;
+}
+
+[data-theme="custom"] .footer-btn {
+  background-color: rgba(255, 255, 255, 0.8) !important;
+  border-color: var(--border) !important;
+  color: var(--text-main) !important;
+}
+
+[data-theme="custom"] .footer-btn:hover {
+  background-color: rgba(255, 255, 255, 0.95) !important;
+  border-color: var(--primary) !important;
+}
+
+[data-theme="custom"] .setting-textarea {
+  background-color: rgba(255, 255, 255, 0.8) !important;
+  border-color: var(--border) !important;
+  color: var(--text-main) !important;
+}
+
+[data-theme="custom"] .setting-btn {
+  background-color: rgba(255, 255, 255, 0.8) !important;
+  border-color: var(--border) !important;
+  color: var(--text-main) !important;
+}
+
+[data-theme="custom"] .setting-btn:hover {
+  background-color: var(--primary-subtle) !important;
+  border-color: var(--primary) !important;
+  color: var(--primary) !important;
+}
+
+[data-theme="custom"] .floating-fab-secondary {
+  background-color: rgba(255, 255, 255, 0.85) !important;
+  border-color: var(--border) !important;
+  color: var(--text-main) !important;
+}
+
+[data-theme="custom"] .floating-fab-secondary:hover {
+  background-color: rgba(255, 255, 255, 0.95) !important;
+  border-color: var(--primary) !important;
+  color: var(--primary) !important;
+}
+
+[data-theme="custom"] #outerContainer {
+  background: var(--custom-bg-app) !important;
+}
+
+/* --- Secondary Toolbar Override --- */
+#secondaryToolbar {
+  background-color: var(--bg-sidebar) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 12px !important;
+  box-shadow: var(--shadow-lg) !important;
+  padding: 8px !important;
+  top: 54px !important; /* Positioned directly below the 48px top toolbar */
+  inset-inline-end: 16px !important;
+  width: 190px !important;
+  transition: opacity 0.2s ease, transform 0.2s ease !important;
+  z-index: 40000 !important;
+}
+
+[data-theme="dark"] #secondaryToolbar {
+  background-color: var(--bg-sidebar) !important;
+  border-color: var(--border) !important;
+}
+
+[data-theme="custom"] #secondaryToolbar {
+  background: rgba(255, 255, 255, 0.75) !important;
+  backdrop-filter: blur(20px) !important;
+  -webkit-backdrop-filter: blur(20px) !important;
+  border-color: var(--custom-border) !important;
+}
+
+/* Secondary Toolbar Buttons */
+.secondaryToolbarButton {
+  border-radius: 8px !important;
+  color: var(--text-main) !important;
+  font-family: var(--font-body) !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  height: 34px !important;
+  line-height: 34px !important;
+  padding: 0 10px !important;
+  margin: 2px 0 !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  cursor: pointer !important;
+  background: transparent !important;
+  transition: background-color var(--transition-fast), color var(--transition-fast) !important;
+  border: none !important;
+  width: 100% !important;
+}
+
+/* Hover & Active States */
+.secondaryToolbarButton:hover {
+  background-color: rgba(211, 84, 0, 0.06) !important;
+  color: var(--primary) !important;
+}
+
+[data-theme="dark"] .secondaryToolbarButton:hover {
+  background-color: rgba(249, 115, 22, 0.08) !important;
+  color: var(--primary) !important;
+}
+
+[data-theme="custom"] .secondaryToolbarButton:hover {
+  background-color: var(--primary-subtle) !important;
+  color: var(--primary) !important;
+}
+
+.secondaryToolbarButton.toggled {
+  background-color: rgba(211, 84, 0, 0.12) !important;
+  color: var(--primary) !important;
+  font-weight: 600 !important;
+}
+
+[data-theme="dark"] .secondaryToolbarButton.toggled {
+  background-color: rgba(249, 115, 22, 0.18) !important;
+  color: var(--primary) !important;
+}
+
+[data-theme="custom"] .secondaryToolbarButton.toggled {
+  background-color: rgba(211, 84, 0, 0.15) !important;
+  color: var(--primary) !important;
+}
+
+/* Align icon masks */
+.secondaryToolbarButton::before {
+  background-color: var(--text-muted) !important;
+  margin: 0 !important;
+  opacity: 0.85 !important;
+  display: inline-block !important;
+  position: static !important;
+}
+
+.secondaryToolbarButton:hover::before,
+.secondaryToolbarButton.toggled::before {
+  background-color: var(--primary) !important;
+  opacity: 1 !important;
+}
+
+/* Secondary Toolbar Toggle rotation */
+#secondaryToolbarToggle {
+  transition: transform var(--transition-fast) !important;
+}
+
+#secondaryToolbarToggle::before {
+  transition: transform var(--transition-fast) !important;
+}
+
+#secondaryToolbarToggle.toggled::before {
+  transform: rotate(90deg) !important;
+}
+

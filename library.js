@@ -12,6 +12,17 @@ const STORE_NAME = 'files';
 const VIEWER_URL = chrome.runtime.getURL('pdfjs-viewer/web/viewer.html');
 
 // ============================================================
+// Global State / Settings
+// ============================================================
+let settings = {
+  theme: 'light',
+  accentHue: 20,
+  accentSaturation: 75,
+  bgStyle: 'solid',
+  accentHueEnd: 200,
+};
+
+// ============================================================
 // IndexedDB Setup
 // ============================================================
 let db = null;
@@ -613,19 +624,47 @@ function applyTheme(theme) {
   document.documentElement.setAttribute('data-theme', theme);
   const sunIcon = document.getElementById('lib-theme-icon-sun');
   const moonIcon = document.getElementById('lib-theme-icon-moon');
-  if (sunIcon) sunIcon.style.display = theme === 'dark' ? 'none' : 'block';
-  if (moonIcon) moonIcon.style.display = theme === 'dark' ? 'block' : 'none';
+  // For sun/moon icons, show sun icon in dark/custom themes and moon icon in light theme
+  if (sunIcon) sunIcon.style.display = (theme === 'dark' || theme === 'custom') ? 'none' : 'block';
+  if (moonIcon) moonIcon.style.display = (theme === 'dark' || theme === 'custom') ? 'block' : 'none';
 }
 
 function applyAccentColor(hue, saturation) {
   if (hue === undefined || hue === null) return;
   const h = hue;
   const s = saturation || 75;
-  document.documentElement.style.setProperty('--primary', `hsl(${h}, ${s}%, 42%)`);
-  document.documentElement.style.setProperty('--primary-hover', `hsl(${h}, ${s}%, 55%)`);
-  document.documentElement.style.setProperty('--primary-gradient',
+  const root = document.documentElement;
+  root.style.setProperty('--primary', `hsl(${h}, ${s}%, 42%)`);
+  root.style.setProperty('--primary-hover', `hsl(${h}, ${s}%, 55%)`);
+  root.style.setProperty('--primary-gradient',
     `linear-gradient(135deg, hsl(${h}, ${s}%, 38%) 0%, hsl(${h}, ${s + 5}%, 52%) 100%)`);
-  document.documentElement.style.setProperty('--primary-subtle', `hsla(${h}, ${s}%, 50%, 0.08)`);
+  root.style.setProperty('--primary-subtle', `hsla(${h}, ${s}%, 50%, 0.08)`);
+
+  // Apply custom theme background colors if custom theme is active
+  if (settings.theme === 'custom') {
+    const isGradient = settings.bgStyle === 'gradient';
+    const hEnd = settings.accentHueEnd !== undefined ? settings.accentHueEnd : 200;
+    
+    // Soft Kindle-like background (saturation 28%, lightness 92%)
+    const bgVal = isGradient
+      ? `linear-gradient(135deg, hsl(${h}, 28%, 92%) 0%, hsl(${hEnd}, 28%, 92%) 100%)`
+      : `hsl(${h}, 28%, 92%)`;
+    
+    const bgHeaderVal = `rgba(255, 255, 255, 0.45)`;
+    const bgSidebarVal = `rgba(255, 255, 255, 0.55)`;
+    const bgCardVal = `rgba(255, 255, 255, 0.75)`;
+    const bgCardHoverVal = `rgba(255, 255, 255, 0.9)`;
+    const borderVal = `hsla(${h}, 20%, 75%, 0.4)`;
+    const borderStrongVal = `hsla(${h}, 20%, 65%, 0.6)`;
+    
+    root.style.setProperty('--custom-bg-app', bgVal);
+    root.style.setProperty('--custom-bg-header', bgHeaderVal);
+    root.style.setProperty('--custom-bg-sidebar', bgSidebarVal);
+    root.style.setProperty('--custom-bg-card', bgCardVal);
+    root.style.setProperty('--custom-bg-card-hover', bgCardHoverVal);
+    root.style.setProperty('--custom-border', borderVal);
+    root.style.setProperty('--custom-border-strong', borderStrongVal);
+  }
 }
 
 // ============================================================
@@ -660,11 +699,11 @@ async function init() {
 
   // Load settings (theme, accent color)
   chrome.storage.local.get(['settings'], (result) => {
-    const settings = result.settings || {};
-    applyTheme(settings.theme || 'light');
-    if (settings.accentHue !== undefined) {
-      applyAccentColor(settings.accentHue, settings.accentSaturation);
+    if (result.settings) {
+      settings = { ...settings, ...result.settings };
     }
+    applyTheme(settings.theme || 'light');
+    applyAccentColor(settings.accentHue, settings.accentSaturation);
   });
 
   // Render library
@@ -691,11 +730,23 @@ async function init() {
   if (themeBtn) {
     themeBtn.addEventListener('click', () => {
       chrome.storage.local.get(['settings'], (result) => {
-        const settings = result.settings || {};
-        const newTheme = (settings.theme || 'light') === 'light' ? 'dark' : 'light';
-        settings.theme = newTheme;
-        chrome.storage.local.set({ settings });
+        const localSettings = result.settings || {};
+        const newTheme = (localSettings.theme === 'light') ? 'dark' : 'light';
+        localSettings.theme = newTheme;
+        settings = { ...settings, ...localSettings };
+        chrome.storage.local.set({ settings: localSettings });
+        
+        // Sync drawer DOM
+        const setDrawerTheme = document.getElementById('setting-theme');
+        if (setDrawerTheme) {
+          setDrawerTheme.value = newTheme;
+          if (typeof toggleCustomColorSettingsVisibility === 'function') {
+            toggleCustomColorSettingsVisibility();
+          }
+        }
+        
         applyTheme(newTheme);
+        applyAccentColor(settings.accentHue, settings.accentSaturation);
       });
     });
   }
@@ -726,7 +777,8 @@ function initSettings() {
 
   // Load existing settings
   chrome.storage.local.get(['settings'], (result) => {
-    const settings = result.settings || {};
+    const loadedSettings = result.settings || {};
+    settings = { ...settings, ...loadedSettings };
     
     // Populate form elements
     document.getElementById('setting-modifier').value = settings.modifierKey || 'Alt';
@@ -746,6 +798,8 @@ function initSettings() {
     document.getElementById('setting-accent-hue').value = settings.accentHue || 20;
     document.getElementById('setting-startup-behavior').value = settings.startupBehavior || 'library';
     document.getElementById('setting-card-mode').value = settings.cardDetailMode || 'contextual';
+    document.getElementById('setting-bg-style').value = settings.bgStyle || 'solid';
+    document.getElementById('setting-accent-hue-end').value = settings.accentHueEnd || 200;
 
     // Show/hide AI configuration groups based on provider
     const toggleAiVisibility = () => {
@@ -754,6 +808,15 @@ function initSettings() {
       document.getElementById('custom-ai-settings-group').style.display = p === 'custom-ai' ? 'block' : 'none';
     };
     toggleAiVisibility();
+
+    // Toggle custom theme settings subgroups visibility
+    const toggleCustomColorSettingsVisibility = () => {
+      const isCustomTheme = document.getElementById('setting-theme').value === 'custom';
+      document.getElementById('custom-color-settings-subgroup').style.display = isCustomTheme ? 'block' : 'none';
+      document.getElementById('setting-accent-hue-end-row').style.display = (isCustomTheme && document.getElementById('setting-bg-style').value === 'gradient') ? 'flex' : 'none';
+    };
+    toggleCustomColorSettingsVisibility();
+    window.toggleCustomColorSettingsVisibility = toggleCustomColorSettingsVisibility;
 
     // Mark active color swatch
     const updateActiveSwatch = (activeHue) => {
@@ -782,8 +845,11 @@ function initSettings() {
         accentSaturation: 75,
         startupBehavior: document.getElementById('setting-startup-behavior').value,
         cardDetailMode: document.getElementById('setting-card-mode').value,
+        bgStyle: document.getElementById('setting-bg-style').value,
+        accentHueEnd: parseInt(document.getElementById('setting-accent-hue-end').value),
       };
       
+      settings = { ...settings, ...updated };
       chrome.storage.local.set({ settings: updated });
       
       // Live updates to library page theme and accent colors
@@ -793,10 +859,11 @@ function initSettings() {
     };
 
     // Listen to form inputs
-    const formInputs = drawer.querySelectorAll('.setting-select, .setting-checkbox, .setting-input-text, .setting-textarea, #setting-accent-hue');
+    const formInputs = drawer.querySelectorAll('.setting-select, .setting-checkbox, .setting-input-text, .setting-textarea, #setting-accent-hue, #setting-bg-style');
     formInputs.forEach(el => {
       el.addEventListener('change', () => {
         if (el.id === 'setting-provider') toggleAiVisibility();
+        if (el.id === 'setting-theme' || el.id === 'setting-bg-style') toggleCustomColorSettingsVisibility();
         saveSettings();
       });
     });
@@ -804,8 +871,19 @@ function initSettings() {
     // Accent hue slider real-time input preview
     document.getElementById('setting-accent-hue').addEventListener('input', (e) => {
       const h = parseInt(e.target.value);
+      settings.accentHue = h;
       applyAccentColor(h, 75);
       updateActiveSwatch(h);
+    });
+
+    // Accent hue end slider real-time input preview
+    document.getElementById('setting-accent-hue-end').addEventListener('input', (e) => {
+      const hEnd = parseInt(e.target.value);
+      settings.accentHueEnd = hEnd;
+      applyAccentColor(settings.accentHue, 75);
+    });
+    document.getElementById('setting-accent-hue-end').addEventListener('change', () => {
+      saveSettings();
     });
 
     // Accent color swatches click handler

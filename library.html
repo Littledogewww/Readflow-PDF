@@ -253,7 +253,21 @@
             <select id="setting-theme" class="setting-select">
               <option value="light">明亮纸张</option>
               <option value="dark">暗黑界面</option>
+              <option value="custom">🎨 自定义色彩主题</option>
             </select>
+          </div>
+          <div id="custom-color-settings-subgroup" style="display: none; margin-top: 10px; border-left: 2px solid var(--primary); padding-left: 10px;">
+            <div class="setting-row">
+              <label for="setting-bg-style">背景类型</label>
+              <select id="setting-bg-style" class="setting-select">
+                <option value="solid">单色背景</option>
+                <option value="gradient">渐变背景</option>
+              </select>
+            </div>
+            <div id="setting-accent-hue-end-row" class="setting-row" style="display: none; margin-top: 10px; flex-direction: column; align-items: stretch; gap: 4px;">
+              <label for="setting-accent-hue-end" style="align-self: flex-start;">渐变结束色相</label>
+              <input type="range" id="setting-accent-hue-end" min="0" max="360" step="1" value="200" class="hue-slider" aria-label="自定义结束色相 0-360">
+            </div>
           </div>
           <div style="margin-top: 14px;">
             <label style="font-size: 12px; font-weight: 600; color: var(--text-sub); display: block; margin-bottom: 8px;">主题色调</label>
