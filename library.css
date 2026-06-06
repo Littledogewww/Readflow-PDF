@@ -686,3 +686,300 @@ body {
 }
 
 [data-theme="dark"] .ctx-item:hover { color: var(--primary); }
+
+/* === Settings Drawer === */
+.lib-drawer {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  visibility: hidden;
+  transition: visibility var(--transition-fast);
+}
+
+.lib-drawer.open {
+  visibility: visible;
+}
+
+.lib-drawer-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(4px);
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+
+.lib-drawer.open .lib-drawer-backdrop {
+  opacity: 1;
+}
+
+.lib-drawer-content {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 380px;
+  max-width: 90%;
+  background: var(--bg-card);
+  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.15);
+  display: flex;
+  flex-direction: column;
+  transform: translateX(100%);
+  transition: transform var(--transition-move);
+  border-left: 1px solid var(--border);
+}
+
+.lib-drawer.open .lib-drawer-content {
+  transform: translateX(0);
+}
+
+.lib-drawer-header {
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--border);
+}
+
+.lib-drawer-header h2 {
+  font-family: var(--font-title);
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.lib-drawer-close {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--text-sub);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.lib-drawer-close:hover {
+  background: var(--primary-subtle);
+  color: var(--primary);
+}
+
+.lib-drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.lib-drawer-body .settings-group {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 20px;
+}
+
+.lib-drawer-body .settings-group:last-child {
+  border-bottom: none;
+}
+
+.lib-drawer-body .settings-group h3 {
+  font-family: var(--font-title);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-sub);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 12px;
+}
+
+.lib-drawer-body .setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  gap: 12px;
+}
+
+.lib-drawer-body .setting-row:last-child {
+  margin-bottom: 0;
+}
+
+.lib-drawer-body .setting-row.column {
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.lib-drawer-body .setting-row.column label {
+  margin-bottom: 4px;
+}
+
+.lib-drawer-body .setting-row label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.lib-drawer-body .setting-select,
+.lib-drawer-body .setting-input-text {
+  background-color: var(--bg-app);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-family: var(--font-body);
+  color: var(--text-main);
+  outline: none;
+  transition: border-color var(--transition-fast);
+}
+
+.lib-drawer-body .setting-select:focus,
+.lib-drawer-body .setting-input-text:focus {
+  border-color: var(--primary);
+}
+
+.lib-drawer-body .setting-input-text {
+  width: 100%;
+}
+
+.lib-drawer-body .setting-textarea {
+  width: 100%;
+  min-height: 80px;
+  font-family: var(--font-body);
+  font-size: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  background-color: var(--bg-app);
+  color: var(--text-main);
+  resize: vertical;
+  outline: none;
+  transition: border-color var(--transition-fast);
+}
+
+.lib-drawer-body .setting-textarea:focus {
+  border-color: var(--primary);
+}
+
+.lib-drawer-body .setting-btn {
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background-color: var(--bg-card);
+  color: var(--text-sub);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.lib-drawer-body .setting-btn:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+  background-color: var(--primary-subtle);
+}
+
+.lib-drawer-body .setting-checkbox {
+  width: auto;
+  cursor: pointer;
+}
+
+.lib-drawer-body .setting-help {
+  font-size: 10px;
+  color: var(--text-muted);
+  line-height: 1.4;
+  margin-top: 4px;
+}
+
+.lib-drawer-body .color-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.lib-drawer-body .color-swatch {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: transform var(--transition-fast), border-color var(--transition-fast);
+  padding: 0;
+  box-shadow: var(--shadow-sm);
+}
+
+.lib-drawer-body .color-swatch:hover {
+  transform: scale(1.15);
+}
+
+.lib-drawer-body .color-swatch.active {
+  border-color: var(--text-main) !important;
+  transform: scale(1.15);
+  box-shadow: 0 0 0 1px var(--bg-card), var(--shadow-md);
+}
+
+.lib-drawer-body .hue-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 8px;
+  border-radius: 4px;
+  background: linear-gradient(to right,
+    hsl(0, 75%, 50%),
+    hsl(60, 75%, 50%),
+    hsl(120, 75%, 50%),
+    hsl(180, 75%, 50%),
+    hsl(240, 75%, 50%),
+    hsl(300, 75%, 50%),
+    hsl(360, 75%, 50%)
+  );
+  outline: none;
+  margin: 8px 0;
+}
+
+.lib-drawer-body .hue-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 2px solid var(--text-main);
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  transition: transform var(--transition-fast);
+}
+
+.lib-drawer-body .hue-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+}
+
+/* Settings elements in dark theme */
+[data-theme="dark"] .lib-drawer-content {
+  background-color: var(--bg-card);
+  border-left-color: var(--border);
+}
+
+[data-theme="dark"] .lib-drawer-body .setting-select,
+[data-theme="dark"] .lib-drawer-body .setting-input-text,
+[data-theme="dark"] .lib-drawer-body .setting-textarea {
+  background-color: var(--bg-app);
+  border-color: var(--border);
+  color: var(--text-main);
+}
+
+[data-theme="dark"] .lib-drawer-body .setting-btn {
+  background-color: var(--bg-card);
+  border-color: var(--border);
+  color: var(--text-sub);
+}
+
+[data-theme="dark"] .lib-drawer-body .setting-btn:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+

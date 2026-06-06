@@ -216,10 +216,6 @@ async function openBook(entry) {
     return;
   }
 
-  // Store current file reference so viewer can save last page etc.
-  const file = await entry.handle.getFile();
-  const blobUrl = URL.createObjectURL(file);
-
   // Update lastOpenedAt
   await dbPut({ ...entry, lastOpenedAt: Date.now() });
 
@@ -229,7 +225,7 @@ async function openBook(entry) {
   });
 
   // Navigate to viewer
-  window.location.href = `${VIEWER_URL}?file=${encodeURIComponent(blobUrl)}&bookId=${encodeURIComponent(entry.id)}&bookName=${encodeURIComponent(entry.name)}`;
+  window.location.href = `${VIEWER_URL}?bookId=${encodeURIComponent(entry.id)}&bookName=${encodeURIComponent(entry.name)}`;
 }
 
 // ============================================================
@@ -707,6 +703,191 @@ async function init() {
   // Close context menu on Escape
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') closeContextMenu();
+  });
+
+  // Init settings drawer
+  initSettings();
+}
+
+// ============================================================
+// Settings Drawer Logic
+// ============================================================
+function initSettings() {
+  const drawer = document.getElementById('lib-settings-drawer');
+  const openBtn = document.getElementById('lib-settings-btn');
+  const closeBtn = document.getElementById('lib-drawer-close-btn');
+  const backdrop = drawer.querySelector('.lib-drawer-backdrop');
+
+  if (!drawer || !openBtn || !closeBtn || !backdrop) return;
+
+  openBtn.addEventListener('click', () => drawer.classList.add('open'));
+  closeBtn.addEventListener('click', () => drawer.classList.remove('open'));
+  backdrop.addEventListener('click', () => drawer.classList.remove('open'));
+
+  // Load existing settings
+  chrome.storage.local.get(['settings'], (result) => {
+    const settings = result.settings || {};
+    
+    // Populate form elements
+    document.getElementById('setting-modifier').value = settings.modifierKey || 'Alt';
+    document.getElementById('setting-always-translate').checked = settings.alwaysTranslate || false;
+    document.getElementById('setting-lang').value = settings.targetLang || 'zh-CN';
+    document.getElementById('setting-provider').value = settings.translationProvider || 'google';
+    
+    if (settings.geminiApiKey) document.getElementById('setting-ai-key').value = settings.geminiApiKey;
+    if (settings.geminiModel) document.getElementById('setting-ai-model').value = settings.geminiModel;
+    
+    document.getElementById('setting-custom-ai-preset').value = '';
+    document.getElementById('setting-custom-ai-url').value = settings.customAiBaseUrl || '';
+    document.getElementById('setting-custom-ai-key').value = settings.customAiKey || '';
+    document.getElementById('setting-custom-ai-model').value = settings.customAiModel || 'deepseek-chat';
+    document.getElementById('setting-custom-ai-prompt').value = settings.customAiPrompt || '';
+    document.getElementById('setting-theme').value = settings.theme || 'light';
+    document.getElementById('setting-accent-hue').value = settings.accentHue || 20;
+    document.getElementById('setting-startup-behavior').value = settings.startupBehavior || 'library';
+    document.getElementById('setting-card-mode').value = settings.cardDetailMode || 'contextual';
+
+    // Show/hide AI configuration groups based on provider
+    const toggleAiVisibility = () => {
+      const p = document.getElementById('setting-provider').value;
+      document.getElementById('ai-settings-group').style.display = p === 'gemini' ? 'block' : 'none';
+      document.getElementById('custom-ai-settings-group').style.display = p === 'custom-ai' ? 'block' : 'none';
+    };
+    toggleAiVisibility();
+
+    // Mark active color swatch
+    const updateActiveSwatch = (activeHue) => {
+      drawer.querySelectorAll('.color-swatch').forEach(sw => {
+        const h = parseInt(sw.dataset.hue);
+        sw.classList.toggle('active', Math.abs(h - activeHue) < 3);
+      });
+    };
+    updateActiveSwatch(settings.accentHue || 20);
+
+    // Save changes
+    const saveSettings = () => {
+      const updated = {
+        modifierKey: document.getElementById('setting-modifier').value,
+        alwaysTranslate: document.getElementById('setting-always-translate').checked,
+        targetLang: document.getElementById('setting-lang').value,
+        translationProvider: document.getElementById('setting-provider').value,
+        geminiApiKey: document.getElementById('setting-ai-key').value,
+        geminiModel: document.getElementById('setting-ai-model').value,
+        customAiBaseUrl: document.getElementById('setting-custom-ai-url').value,
+        customAiKey: document.getElementById('setting-custom-ai-key').value,
+        customAiModel: document.getElementById('setting-custom-ai-model').value,
+        customAiPrompt: document.getElementById('setting-custom-ai-prompt').value,
+        theme: document.getElementById('setting-theme').value,
+        accentHue: parseInt(document.getElementById('setting-accent-hue').value),
+        accentSaturation: 75,
+        startupBehavior: document.getElementById('setting-startup-behavior').value,
+        cardDetailMode: document.getElementById('setting-card-mode').value,
+      };
+      
+      chrome.storage.local.set({ settings: updated });
+      
+      // Live updates to library page theme and accent colors
+      applyTheme(updated.theme);
+      applyAccentColor(updated.accentHue, updated.accentSaturation);
+      updateActiveSwatch(updated.accentHue);
+    };
+
+    // Listen to form inputs
+    const formInputs = drawer.querySelectorAll('.setting-select, .setting-checkbox, .setting-input-text, .setting-textarea, #setting-accent-hue');
+    formInputs.forEach(el => {
+      el.addEventListener('change', () => {
+        if (el.id === 'setting-provider') toggleAiVisibility();
+        saveSettings();
+      });
+    });
+
+    // Accent hue slider real-time input preview
+    document.getElementById('setting-accent-hue').addEventListener('input', (e) => {
+      const h = parseInt(e.target.value);
+      applyAccentColor(h, 75);
+      updateActiveSwatch(h);
+    });
+
+    // Accent color swatches click handler
+    drawer.addEventListener('click', (e) => {
+      const swatch = e.target.closest('.color-swatch');
+      if (swatch) {
+        const hue = parseInt(swatch.dataset.hue);
+        document.getElementById('setting-accent-hue').value = hue;
+        applyAccentColor(hue, 75);
+        updateActiveSwatch(hue);
+        saveSettings();
+      }
+    });
+
+    // Custom AI provider presets picker
+    document.getElementById('setting-custom-ai-preset').addEventListener('change', (e) => {
+      const presets = {
+        deepseek: { url: 'https://api.deepseek.com/v1', model: 'deepseek-chat' },
+        qwen:     { url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-plus' },
+        moonshot: { url: 'https://api.moonshot.cn/v1', model: 'moonshot-v1-8k' },
+        openrouter:{ url: 'https://openrouter.ai/api/v1', model: 'openai/gpt-4o-mini' },
+        ollama:   { url: 'http://localhost:11434/v1', model: 'llama3' },
+      };
+      const p = presets[e.target.value];
+      if (p) {
+        document.getElementById('setting-custom-ai-url').value = p.url;
+        document.getElementById('setting-custom-ai-model').value = p.model;
+        saveSettings();
+      }
+    });
+
+    // Test connection button handler
+    document.getElementById('btn-test-custom-ai').addEventListener('click', async () => {
+      const resultEl = document.getElementById('custom-ai-test-result');
+      const btnTest = document.getElementById('btn-test-custom-ai');
+      
+      const baseUrl = (document.getElementById('setting-custom-ai-url').value || '').replace(/\/$/, '');
+      const apiKey = document.getElementById('setting-custom-ai-key').value || '';
+      const model = document.getElementById('setting-custom-ai-model').value || 'deepseek-chat';
+
+      if (!baseUrl || !apiKey) {
+        resultEl.textContent = '⚠️ 请先填写 URL 和 API Key';
+        resultEl.style.color = 'var(--danger)';
+        return;
+      }
+
+      btnTest.disabled = true;
+      btnTest.textContent = '测试中...';
+      resultEl.textContent = '';
+
+      try {
+        const response = await fetch(`${baseUrl}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model,
+            messages: [{ role: 'user', content: 'Reply with the single word: OK' }],
+            max_tokens: 10,
+            temperature: 0,
+          }),
+        });
+
+        if (!response.ok) {
+          const err = await response.json().catch(() => ({}));
+          throw new Error(err.error?.message || `HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+        const reply = data.choices?.[0]?.message?.content?.trim();
+        resultEl.textContent = `✅ 连接成功！回复: "${reply}"`;
+        resultEl.style.color = 'var(--success, #16a34a)';
+      } catch (e) {
+        resultEl.textContent = `❌ 失败: ${e.message}`;
+        resultEl.style.color = 'var(--danger)';
+      } finally {
+        btnTest.disabled = false;
+        btnTest.textContent = '🔍 测试连接';
+      }
+    });
   });
 }
 

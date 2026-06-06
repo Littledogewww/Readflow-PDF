@@ -134,6 +134,13 @@ document.addEventListener('DOMContentLoaded', async () => {
           saveLastReadPage(bookId, e.pageNumber);
         }
       });
+
+      // Load book from library if bookId is present in url
+      const urlParams = new URLSearchParams(window.location.search);
+      const bookId = urlParams.get('bookId');
+      if (bookId) {
+        loadBookFromLibrary(bookId);
+      }
       
       // Initial Layout Update
       updateLayout();
@@ -777,6 +784,60 @@ function updateLayout() {
   if (btnLeft) btnLeft.classList.toggle('active', dock === 'left');
   if (btnBottom) btnBottom.classList.toggle('active', dock === 'bottom');
   if (btnRight) btnRight.classList.toggle('active', dock === 'right');
+
+  // Check fullscreen mode
+  const isFs = !!document.fullscreenElement;
+  if (isFs) {
+    // In fullscreen: main always spans 100% of viewport, sidebars are floating covers
+    main.style.left = '0';
+    main.style.right = '0';
+    main.style.top = '0';
+    main.style.bottom = '0';
+
+    sb.style.display = isOpen ? 'flex' : 'none';
+    if (isOpen) {
+      if (dock === 'right') {
+        const w = settings.sidebarWidth || 380;
+        sb.style.width = w + 'px';
+        sb.style.right = '0';
+        sb.style.top = '0';
+        sb.style.height = '100vh';
+        outer.style.setProperty('--sidebar-width-active', w + 'px');
+        outer.style.setProperty('--sidebar-height-active', '0px');
+      } else if (dock === 'left') {
+        const w = settings.sidebarWidth || 380;
+        sb.style.width = w + 'px';
+        sb.style.left = '0';
+        sb.style.top = '0';
+        sb.style.height = '100vh';
+        outer.style.setProperty('--sidebar-width-active', '0px');
+        outer.style.setProperty('--sidebar-height-active', '0px');
+      } else if (dock === 'bottom') {
+        const h = settings.sidebarHeight || 300;
+        sb.style.height = h + 'px';
+        sb.style.left = '0';
+        sb.style.right = '0';
+        sb.style.bottom = '0';
+        outer.style.setProperty('--sidebar-width-active', '0px');
+        outer.style.setProperty('--sidebar-height-active', h + 'px');
+      }
+    } else {
+      outer.style.setProperty('--sidebar-width-active', '0px');
+      outer.style.setProperty('--sidebar-height-active', '0px');
+    }
+    
+    window.dispatchEvent(new Event('resize'));
+    if (window.PDFViewerApplication && window.PDFViewerApplication.pdfViewer) {
+      const viewer = window.PDFViewerApplication.pdfViewer;
+      if (viewer.currentScaleValue === 'auto' || 
+          viewer.currentScaleValue === 'page-width' || 
+          viewer.currentScaleValue === 'page-fit' ||
+          viewer.currentScaleValue === 'page-height') {
+        viewer.currentScaleValue = viewer.currentScaleValue;
+      }
+    }
+    return;
+  }
 
   if (!isOpen) {
     // Notebook closed: PDF workspace flows right to native outline edge
@@ -1882,8 +1943,9 @@ function applyTheme() {
 function initWelcomeOverlay() {
   const urlParams = new URLSearchParams(window.location.search);
   const hasFile = urlParams.has('file');
+  const hasBookId = urlParams.has('bookId');
 
-  if (!hasFile) {
+  if (!hasFile && !hasBookId) {
     // Check startup behavior: redirect to library if set
     const startupBehavior = settings.startupBehavior || 'library';
     if (startupBehavior === 'library') {
@@ -2271,6 +2333,47 @@ async function saveLastReadPage(bookId, pageNum) {
     }
   } catch (err) {
     console.error('[ReadFlow] Failed to save last read page:', err);
+  }
+}
+
+async function loadBookFromLibrary(bookId) {
+  try {
+    const db = await openLibraryDB();
+    const tx = db.transaction(LIB_STORE_NAME, 'readonly');
+    const store = tx.objectStore(LIB_STORE_NAME);
+    const entry = await new Promise((resolve, reject) => {
+      const getReq = store.get(bookId);
+      getReq.onsuccess = () => resolve(getReq.result);
+      getReq.onerror = () => reject(getReq.error);
+    });
+
+    if (!entry || !entry.handle) {
+      showSystemToast('未找到该图书记录');
+      showStandardWelcomeOverlay();
+      return;
+    }
+
+    // Request read permission if needed (usually already active from library tab)
+    let perm = await entry.handle.queryPermission({ mode: 'read' });
+    if (perm === 'prompt') {
+      perm = await entry.handle.requestPermission({ mode: 'read' });
+    }
+    if (perm !== 'granted') {
+      showSystemToast('需要文件读取权限才能打开');
+      showStandardWelcomeOverlay();
+      return;
+    }
+
+    const file = await entry.handle.getFile();
+    const localBlobUrl = URL.createObjectURL(file);
+    
+    if (window.PDFViewerApplication) {
+      window.PDFViewerApplication.open({ url: localBlobUrl, originalUrl: entry.name });
+    }
+  } catch (err) {
+    console.error('[ReadFlow] Failed to load book from IndexedDB:', err);
+    showSystemToast('打开图书失败，请在书架重新打开');
+    showStandardWelcomeOverlay();
   }
 }
 

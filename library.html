@@ -60,6 +60,13 @@
           <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
         </svg>
       </button>
+      <button id="lib-settings-btn" class="lib-btn lib-btn-ghost" aria-label="打开设置" title="系统设置">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.5"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="3"></circle>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+        </svg>
+      </button>
     </div>
   </header>
 
@@ -131,6 +138,162 @@
   <!-- Hidden file input -->
   <input type="file" id="lib-file-input" accept=".pdf" multiple style="display:none"
          aria-label="选择 PDF 文件">
+
+  <!-- Settings Drawer -->
+  <div id="lib-settings-drawer" class="lib-drawer" aria-hidden="true">
+    <div class="lib-drawer-backdrop"></div>
+    <div class="lib-drawer-content">
+      <div class="lib-drawer-header">
+        <h2>全局设置</h2>
+        <button id="lib-drawer-close-btn" class="lib-drawer-close" aria-label="关闭设置">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+      <div class="lib-drawer-body">
+        <div class="settings-group">
+          <h3>取词与快捷键</h3>
+          <div class="setting-row">
+            <label for="setting-modifier">快捷修饰键</label>
+            <select id="setting-modifier" class="setting-select">
+              <option value="Alt">Alt 键 (推荐)</option>
+              <option value="Ctrl">Ctrl 键</option>
+              <option value="Shift">Shift 键</option>
+              <option value="None">无 (直接选词)</option>
+            </select>
+          </div>
+          <div class="setting-row" style="margin-top: 10px; display: flex; align-items: center; justify-content: space-between;">
+            <label for="setting-always-translate">无修饰键直接选词</label>
+            <input type="checkbox" id="setting-always-translate" class="setting-checkbox" style="cursor: pointer;">
+          </div>
+          <p class="setting-help">按住修饰键并双击单词或划选文本将触发收集。</p>
+        </div>
+
+        <div class="settings-group">
+          <h3>翻译设置</h3>
+          <div class="setting-row">
+            <label for="setting-lang">目标翻译语言</label>
+            <select id="setting-lang" class="setting-select">
+              <option value="zh-CN">中文 (简体)</option>
+              <option value="zh-TW">中文 (繁体)</option>
+              <option value="en">English (Definitions)</option>
+              <option value="es">Español</option>
+              <option value="ja">日本語</option>
+              <option value="fr">Français</option>
+              <option value="de">Deutsch</option>
+            </select>
+          </div>
+          <div class="setting-row">
+            <label for="setting-provider">翻译服务商</label>
+            <select id="setting-provider" class="setting-select">
+              <option value="google">Google 翻译 (内置)</option>
+              <option value="dictionary">英汉/英英词典 (仅英文)</option>
+              <option value="gemini">Gemini AI (上下文翻译)</option>
+              <option value="custom-ai">🔧 自定义 AI 接口</option>
+            </select>
+          </div>
+        </div>
+
+        <div id="ai-settings-group" class="settings-group" style="display: none;">
+          <h3>Gemini AI 配置</h3>
+          <div class="setting-row column">
+            <label for="setting-ai-key">Gemini API Key</label>
+            <input type="password" id="setting-ai-key" placeholder="输入 API 密钥..." class="setting-input-text">
+          </div>
+          <div class="setting-row">
+            <label for="setting-ai-model">AI 模型</label>
+            <select id="setting-ai-model" class="setting-select">
+              <option value="gemini-1.5-flash">Gemini 1.5 Flash (推荐)</option>
+              <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
+            </select>
+          </div>
+        </div>
+
+        <div id="custom-ai-settings-group" class="settings-group" style="display: none;">
+          <h3>🔧 自定义 AI 接口</h3>
+          <div class="setting-row">
+            <label for="setting-custom-ai-preset">服务商预设</label>
+            <select id="setting-custom-ai-preset" class="setting-select">
+              <option value="">自定义</option>
+              <option value="deepseek">DeepSeek</option>
+              <option value="qwen">阿里百炼 (Qwen)</option>
+              <option value="moonshot">Moonshot (Kimi)</option>
+              <option value="openrouter">OpenRouter</option>
+              <option value="ollama">Ollama (本地)</option>
+            </select>
+          </div>
+          <div class="setting-row column">
+            <label for="setting-custom-ai-url">Base URL</label>
+            <input type="text" id="setting-custom-ai-url" placeholder="https://api.deepseek.com/v1" class="setting-input-text">
+          </div>
+          <div class="setting-row column">
+            <label for="setting-custom-ai-key">API Key</label>
+            <input type="password" id="setting-custom-ai-key" placeholder="sk-..." class="setting-input-text">
+          </div>
+          <div class="setting-row column">
+            <label for="setting-custom-ai-model">模型名称</label>
+            <input type="text" id="setting-custom-ai-model" placeholder="deepseek-chat" class="setting-input-text">
+          </div>
+          <div class="setting-row column">
+            <label for="setting-custom-ai-prompt">Prompt 模板</label>
+            <textarea id="setting-custom-ai-prompt" class="setting-textarea" rows="4"></textarea>
+          </div>
+          <div style="display: flex; align-items: center; gap: 10px; margin-top: 8px;">
+            <button id="btn-test-custom-ai" class="setting-btn">🔍 测试连接</button>
+            <span id="custom-ai-test-result" class="setting-help" style="margin: 0; font-weight: 600;"></span>
+          </div>
+        </div>
+
+        <div class="settings-group">
+          <h3>外观与主题色</h3>
+          <div class="setting-row">
+            <label for="setting-theme">界面主题</label>
+            <select id="setting-theme" class="setting-select">
+              <option value="light">明亮纸张</option>
+              <option value="dark">暗黑界面</option>
+            </select>
+          </div>
+          <div style="margin-top: 14px;">
+            <label style="font-size: 12px; font-weight: 600; color: var(--text-sub); display: block; margin-bottom: 8px;">主题色调</label>
+            <div class="color-swatches" id="color-swatches">
+              <button class="color-swatch" data-hue="20" title="橙红 (默认)" style="background:hsl(20,75%,48%)"></button>
+              <button class="color-swatch" data-hue="225" title="靛蓝" style="background:hsl(225,70%,50%)"></button>
+              <button class="color-swatch" data-hue="152" title="翡翠绿" style="background:hsl(152,60%,40%)"></button>
+              <button class="color-swatch" data-hue="345" title="玫瑰红" style="background:hsl(345,72%,48%)"></button>
+              <button class="color-swatch" data-hue="195" title="青蓝" style="background:hsl(195,78%,42%)"></button>
+              <button class="color-swatch" data-hue="40" title="琥珀金" style="background:hsl(40,88%,45%)"></button>
+              <button class="color-swatch" data-hue="270" title="紫罗兰" style="background:hsl(270,58%,50%)"></button>
+              <button class="color-swatch" data-hue="215" title="深蓝灰" style="background:hsl(215,32%,45%)"></button>
+            </div>
+            <div style="margin-top: 10px;">
+              <input type="range" id="setting-accent-hue" min="0" max="360" step="1" value="20" class="hue-slider">
+            </div>
+          </div>
+          <div class="setting-row" style="margin-top: 12px;">
+            <label for="setting-card-mode">卡片展示模式</label>
+            <select id="setting-card-mode" class="setting-select">
+              <option value="minimal">极简模式 (仅释义)</option>
+              <option value="contextual">上下文模式 (释义+例句)</option>
+              <option value="full">完整模式 (展示来源及详情)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="settings-group">
+          <h3>启动行为</h3>
+          <div class="setting-row">
+            <label for="setting-startup-behavior">打开阅读器时</label>
+            <select id="setting-startup-behavior" class="setting-select">
+              <option value="library">进入书架界面</option>
+              <option value="reopen">重新打开上次文件</option>
+            </select>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <script src="library.js"></script>
 </body>
