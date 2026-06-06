@@ -1,10 +1,10 @@
-# ReadFlow PDF (顺流阅读助手) 🌊
+# ReadFlow PDF
 
 [![Chrome Extension](https://img.shields.io/badge/Chrome-Extension-blue.svg?logo=google-chrome&logoColor=white)](#)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](#)
 
-**ReadFlow PDF (顺流阅读助手)** 是一款专为学术阅读、文献理解与外语学习而设计的 Chrome 浏览器插件。基于 Mozilla 官方 PDF.js 深度二次开发，配备极其优雅的 Kindle 纸质书风格排版设计以及实时上下文翻译功能，让您的论文阅读与单词积累像流水般顺畅。
+**ReadFlow PDF** 是一款专为学术阅读、文献理解与外语学习而设计的 Chrome 浏览器插件。基于 Mozilla 官方 PDF.js 深度二次开发，配备极其优雅的 Kindle 纸质书风格排版设计以及实时上下文翻译功能，让您的论文阅读与单词积累像流水般顺畅。
 
 ---
 
@@ -21,21 +21,12 @@
 - **Alt+B 快捷键**：一键在“快捷取词”和“直接选词”之间无缝切换，并配备优美的悬浮通知提示。
 - **上下文关联**：自动提取生词所在的句子上下文，并在单词卡中对目标词汇进行高亮呈现，帮助在语境中温习生词。
 
-### 3. 🎯 VSCode 式三向弹性控制台面板
-- 支持 **左停靠、右停靠、底停靠** 三种布局模式。
-- **右/左停靠**：在侧边展示单词卡片与配置参数。
-- **底部停靠**：自动切换至 VSCode 双栏网格排版，左侧保留搜索过滤，右侧自适应平铺单词卡片。
-- **动态悬浮按钮 (FAB)**：底部的侧边栏切换按钮会根据侧边栏拖拽宽度和停靠位置实时计算像素偏移，永不发生遮挡。
-
-### 4. 🗂️ 单词卡多重密度展示与高效导出
+### 3. 🗂️ 单词卡多重密度展示与高效导出
 - **三档密度设置**：
   - *极简模式*：只展示生词和翻译，适合快速浏览。
   - *上下文模式*：附带生词出现的原句高亮。
   - *完整模式*：展示原句、页码以及来源 PDF 文件名。
 - **一键导出**：支持一键将单词导出为标准 **CSV 格式**，或可直接导入的 **Anki (TSV) 记忆卡格式**。
-
-### 5. 🤖 Gemini AI 上下文翻译 (可选)
-- 除了内置的 Google 翻译和英汉词典服务，支持直接接入 Google Gemini 官方大模型 API，结合学术文章上下文进行专业细分语境下的高精准翻译。
 
 ---
 
