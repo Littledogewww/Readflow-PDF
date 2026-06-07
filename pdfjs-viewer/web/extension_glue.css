@@ -1739,7 +1739,7 @@
   color: var(--primary) !important;
 }
 
-[data-theme="custom"] #outerContainer {
+#outerContainer[data-theme="custom"] {
   background: var(--custom-bg-app) !important;
 }
 
