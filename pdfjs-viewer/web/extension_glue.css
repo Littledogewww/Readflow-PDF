@@ -787,52 +787,6 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-.card-notes {
-  margin-top: 6px;
-  font-size: 11px;
-  color: var(--text-main);
-  line-height: 1.5;
-  background-color: rgba(39, 174, 96, 0.05); /* soft green */
-  padding: 6px 8px;
-  border-radius: 6px;
-  border-left: 2px solid rgba(39, 174, 96, 0.35);
-  word-break: break-word;
-}
-
-[data-theme="dark"] .card-notes {
-  background-color: rgba(52, 211, 153, 0.04);
-  border-left-color: rgba(52, 211, 153, 0.35);
-}
-
-[data-theme="custom"] .card-notes {
-  background-color: var(--primary-subtle);
-  border-left-color: var(--primary);
-  filter: hue-rotate(90deg); /* Adjust hue slightly to distinguish from standard accents */
-}
-
-.vocab-card.editing {
-  border-color: var(--primary);
-  box-shadow: var(--shadow-md);
-  background-color: var(--bg-card-hover);
-}
-
-.edit-context-input, .edit-notes-input {
-  width: 100%;
-  font-size: 11px;
-  font-family: var(--font-body);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 6px;
-  box-sizing: border-box;
-  resize: vertical;
-  background-color: var(--bg-card);
-  color: var(--text-main);
-  outline: none;
-  transition: border-color 0.2s;
-}
-
-.edit-context-input:focus, .edit-notes-input:focus {
-  border-color: var(--primary);
 }
 
 .card-meta {
@@ -1968,4 +1922,57 @@
 #secondaryToolbarToggle.toggled::before {
   transform: rotate(90deg) !important;
 }
+
+/* --- ReadFlow v3.1 Card Editor & Notes --- */
+.vocab-card.card-editor {
+  cursor: default !important;
+  border: 1.5px solid rgba(99, 102, 241, 0.4);
+  background-color: var(--bg-card);
+  padding: 12px 14px !important;
+  transition: all 0.25s ease;
+  box-shadow: var(--shadow-md);
+}
+
+.vocab-card.card-editor input,
+.vocab-card.card-editor textarea {
+  transition: border-color var(--transition-fast) !important;
+}
+
+.vocab-card.card-editor input:focus,
+.vocab-card.card-editor textarea:focus {
+  border-color: #6366f1 !important;
+  outline: none !important;
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.1) !important;
+}
+
+.card-note-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-main);
+  line-height: 1.5;
+  background-color: rgba(67, 97, 238, 0.04);
+  padding: 6px 8px;
+  border-radius: 6px;
+  border-left: 2px solid rgba(67, 97, 238, 0.3);
+  word-break: break-word;
+  margin-top: 6px;
+}
+
+[data-theme="dark"] .card-note-item {
+  background-color: rgba(99, 102, 241, 0.08);
+  border-left-color: rgba(129, 140, 248, 0.45);
+}
+
+[data-theme="custom"] .card-note-item {
+  background-color: rgba(99, 102, 241, 0.08);
+  border-left-color: rgba(99, 102, 241, 0.45);
+}
+
+.readflow-context-menu {
+  /* Prevent context menu from fading out on hover out, handled by click outside */
+  transition: opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1), transform 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
 

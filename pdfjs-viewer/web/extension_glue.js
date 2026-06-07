@@ -197,6 +197,10 @@ function migrateVocabData(rawList) {
 
   // Check if already migrated: look for `contexts` array on first item
   if (rawList[0].contexts && Array.isArray(rawList[0].contexts)) {
+    // Ensure all items have a notes array
+    rawList.forEach(item => {
+      if (!item.notes) item.notes = [];
+    });
     return rawList; // Already in v3 format
   }
 
@@ -219,7 +223,8 @@ function migrateVocabData(rawList) {
         source_pdf: item.source_pdf,
         lookups: item.lookups || 1,
         timestamp: item.timestamp || Date.now(),
-        contexts: []
+        contexts: [],
+        notes: []
       });
     }
     const group = groups.get(key);
@@ -813,7 +818,6 @@ function setupExtensionEventListeners() {
   const viewerContainer = document.getElementById('viewerContainer');
   if (viewerContainer) {
     viewerContainer.addEventListener('mouseup', handleTextSelection);
-    viewerContainer.addEventListener('contextmenu', handleHighlightRightClick);
   }
 
   // Global Keydown Shortcut Listener
@@ -1290,20 +1294,6 @@ async function handleTextSelection(e) {
     showToastError(word, rect);
   }
 }
-async function handleHighlightRightClick(e) {
-  const mark = e.target.closest('mark.readflow-highlight');
-  if (!mark) return;
-
-  e.preventDefault();
-  e.stopPropagation();
-
-  const vocabId = mark.dataset.vocabId;
-  const vocabItem = vocabList.find(item => item.id === vocabId);
-  if (!vocabItem) return;
-
-  const rect = mark.getBoundingClientRect();
-  showToastResult(vocabItem, rect);
-}
 
 // Bounding box horizontal & vertical spatial layout text reconstruction
 function getPageTextAndOffset(textLayerEl, range) {
@@ -1363,43 +1353,102 @@ function getPageTextAndOffset(textLayerEl, range) {
   return { text: reconstructedText, offset: charOffset };
 }
 
-// --- v3.0: Smart Sentence Segmentation Engine ---
-function cleanSentence(text) {
-  if (!text) return '';
-  
-  // 1. Join hyphenated words at line breaks
-  // E.g. "antibiot-\nics1" -> "antibiotics1", "chal-\nlenging" -> "challenging"
-  text = text.replace(/([a-zA-Z]+)-\s*[\r\n\s]+\s*([a-zA-Z0-9]+)/g, '$1$2');
-  
-  // 2. Match standalone numbers/ranges right before a punctuation (en-dash and normal hyphen)
-  // E.g., "sensitivity 5–7\n." -> "sensitivity\n."
-  text = text.replace(/\s+\d+(?:[\s,–-]+\d+)*(?=\s*[,.?;:!])/g, '');
-  
-  // 3. Match numbers/ranges attached to the end of a word
-  // E.g., "developed3,4" -> "developed", "morbidity8–10" -> "morbidity", "resistance11" -> "resistance"
-  text = text.replace(/(?<=[a-zA-Z])\d+(?:[\s,–-]+\d+)*(?=\s*[,.?;:!]|\s|$)/g, '');
-  
-  // 4. Replace remaining newlines with spaces and collapse whitespace
-  text = text.replace(/[\r\n]+/g, ' ');
-  text = text.replace(/\s+/g, ' ');
-  
-  // 5. Remove space before punctuation marks (often left after replacements or text extraction)
-  text = text.replace(/\s+(?=[,.?;:!])/g, '');
-  
-  return text.trim();
+// --- v3.1: Smart Sentence Segmentation Engine ---
+
+/**
+ * preNormalizeText(rawText)
+ * Pre-processes raw PDF text-layer text BEFORE sentence segmentation.
+ * Handles: line-break hyphens, single-newline wraps, citation numbers.
+ */
+function preNormalizeText(rawText) {
+  if (!rawText) return '';
+  let t = rawText;
+
+  // 1. Join hyphenated words split across lines
+  // "antibiot-\nics" → "antibiotics", "chal-\nlenging" → "challenging"
+  t = t.replace(/([a-zA-Z])-[ \t]*[\r\n]+[ \t]*/g, '$1');
+
+  // 2. Replace single newlines (visual line wraps) with spaces.
+  //    Preserve double-newlines (paragraph breaks) by first protecting them.
+  t = t.replace(/\r\n/g, '\n');                  // normalize CRLF
+  t = t.replace(/\n{2,}/g, '\n\n');              // normalize multiple to double
+  // Temporarily protect paragraph breaks
+  const PARA_MARKER = '\x00PARA\x00';
+  t = t.replace(/\n\n/g, PARA_MARKER);
+  // Now all remaining \n are single line wraps → replace with space
+  t = t.replace(/\n/g, ' ');
+  // Restore paragraph breaks as double-newline
+  t = t.replace(new RegExp(PARA_MARKER.replace(/\x00/g, '\\x00'), 'g'), '\n\n');
+
+  // 3. Strip citation superscript numbers attached to words
+  // "developed3,4" → "developed", "resistance11" → "resistance", "speciate2" → "speciate"
+  t = t.replace(/(?<=[a-zA-Z])\d+(?:\s*[,–-]\s*\d+)*(?=\s*[.,?;:!)\]]|\s|$)/g, '');
+
+  // 4. Strip standalone citation numbers before punctuation
+  // "sensitivity 5–7." → "sensitivity."
+  t = t.replace(/\s+\d+(?:\s*[,–-]\s*\d+)*(?=\s*[.,?;:!)\]])/g, '');
+
+  // 5. Collapse multiple spaces
+  t = t.replace(/[ \t]+/g, ' ');
+
+  // 6. Remove space immediately before punctuation
+  t = t.replace(/ +(?=[.,?;:!)\]])/g, '');
+
+  return t.trim();
 }
 
+/**
+ * cleanWord(w)
+ * Cleans up a raw word selected from PDF text (hyphens, newlines, citations).
+ */
 function cleanWord(w) {
   if (!w) return '';
   // Join hyphens at line breaks/spaces inside the word
-  w = w.replace(/([a-zA-Z]+)-\s*[\r\n\s]+\s*([a-zA-Z0-9]+)/g, '$1$2');
+  w = w.replace(/([a-zA-Z])-\s*[\r\n\s]+\s*([a-zA-Z0-9]+)/g, '$1$2');
   // Replace other newlines/spaces with a single space
   w = w.replace(/[\r\n\s]+/g, ' ');
   // Strip trailing citation numbers
   w = w.replace(/(?<=[a-zA-Z])\d+(?:[\s,–-]+\d+)*(?=\s*[,.?;:!]|\s|$)/g, '');
   return w.trim();
 }
-// Abbreviation whitelist — periods after these tokens do NOT end a sentence
+
+/**
+ * getContextSentence(fullText, startOffset, wordLength)
+ * Extracts the complete sentence containing the selected word.
+ * Pre-normalizes the text to join line breaks before segmenting.
+ */
+function getContextSentence(fullText, startOffset, wordLength) {
+  // Extract the raw selected word from the original text
+  const rawWord = fullText.slice(startOffset, startOffset + wordLength);
+  const cleanedWord = cleanWord(rawWord).toLowerCase();
+
+  // Pre-normalize the entire text, THEN segment into sentences
+  const normalized = preNormalizeText(fullText);
+  const sentences = segmentSentences(normalized);
+
+  // Find the sentence that contains our word (by text match in normalized text)
+  if (cleanedWord.length > 0) {
+    for (const s of sentences) {
+      if (s.sentence.toLowerCase().includes(cleanedWord)) {
+        return s.sentence.trim();
+      }
+    }
+  }
+
+  // Fallback: find by rough position ratio mapping
+  const ratio = startOffset / Math.max(fullText.length, 1);
+  const approxPos = Math.floor(ratio * normalized.length);
+  for (const s of sentences) {
+    if (approxPos >= s.start && approxPos < s.end) {
+      return s.sentence.trim();
+    }
+  }
+
+  // Last resort: return a window around the word
+  const fallbackStart = Math.max(0, approxPos - 120);
+  const fallbackEnd = Math.min(normalized.length, approxPos + wordLength + 120);
+  return normalized.slice(fallbackStart, fallbackEnd).trim();
+}
 const ABBREVIATIONS = new Set([
   // Titles
   'mr', 'mrs', 'ms', 'dr', 'prof', 'jr', 'sr', 'rev',
@@ -1523,31 +1572,13 @@ function segmentSentences(text) {
     // Newline handling: if previous text ends with a period, it's already handled.
     // If newline appears with significant gap (paragraph break), treat as sentence boundary
     if (ch === '\n' || ch === '\r') {
-      let nextIdx = i + 1;
-      if (ch === '\r' && text[nextIdx] === '\n') {
-        nextIdx++; // Skip the \n in \r\n to get past the first line break
-      }
-      // Now search for the next line break
-      let isDouble = false;
-      while (nextIdx < text.length && (text[nextIdx] === ' ' || text[nextIdx] === '\t')) {
-        nextIdx++;
-      }
-      if (nextIdx < text.length && (text[nextIdx] === '\n' || text[nextIdx] === '\r')) {
-        isDouble = true;
-      }
-      
-      if (isDouble) {
+      // Look ahead for double-newline (paragraph break)
+      if (i + 1 < text.length && (text[i + 1] === '\n' || text[i + 1] === '\r')) {
         const raw = text.slice(sentenceStart, i).trim();
         if (raw.length > 0) {
           sentences.push({ sentence: raw, start: sentenceStart, end: i });
         }
-        sentenceStart = nextIdx;
-        // Skip the line break(s) at nextIdx
-        if (text[nextIdx] === '\r' && text[nextIdx + 1] === '\n') {
-          sentenceStart += 2;
-        } else {
-          sentenceStart += 1;
-        }
+        sentenceStart = i + 1;
         while (sentenceStart < text.length && /[\n\r\s]/.test(text[sentenceStart])) {
           sentenceStart++;
         }
@@ -1565,21 +1596,7 @@ function segmentSentences(text) {
   return sentences;
 }
 
-function getContextSentence(fullText, startOffset, wordLength) {
-  const sentences = segmentSentences(fullText);
 
-  // Find the sentence that contains the word
-  for (const s of sentences) {
-    if (startOffset >= s.start && startOffset < s.end) {
-      return cleanSentence(s.sentence);
-    }
-  }
-
-  // Fallback: return a window around the word (±120 chars)
-  const fallbackStart = Math.max(0, startOffset - 120);
-  const fallbackEnd = Math.min(fullText.length, startOffset + wordLength + 120);
-  return cleanSentence(fullText.slice(fallbackStart, fallbackEnd));
-}
 
 // --- Translation Engine ---
 async function translateWord(word, context) {
@@ -1713,7 +1730,8 @@ async function saveVocabWord(wordData) {
       source_pdf: wordData.currentPdf,
       lookups: 1,
       timestamp: now,
-      contexts: newContext.sentence.trim().length > 0 ? [newContext] : []
+      contexts: newContext.sentence.trim().length > 0 ? [newContext] : [],
+      notes: []
     };
     vocabList.push(item);
   }
@@ -1767,6 +1785,7 @@ async function clearEntireDatabase() {
 }
 
 // --- Highlighting Engine (v3.0 Word-Centric) ---
+// --- Highlighting Engine (v3.1 Text-Matching & Word-Centric) ---
 function applyPageHighlights(pageNum, textLayerContainer) {
   // Clear existing highlights
   const marks = textLayerContainer.querySelectorAll('mark.readflow-highlight');
@@ -1783,28 +1802,355 @@ function applyPageHighlights(pageNum, textLayerContainer) {
 
   const currentPdf = getCurrentPdfName();
   
-  // Collect all highlight targets for this page from contexts[] arrays
-  const highlightTargets = [];
+  // Collect all vocab items that have contexts on this page
+  const pageVocabItems = new Map(); // word lower -> { word, id, lookups }
   vocabList.forEach(item => {
     if (item.source_pdf !== currentPdf) return;
     const contexts = item.contexts || [];
-    contexts.forEach(ctx => {
-      if (ctx.page === pageNum) {
-        highlightTargets.push({
-          charOffset: ctx.charOffset,
-          length: ctx.length,
-          lookups: item.lookups,
-          vocabId: item.id
+    if (contexts.some(ctx => ctx.page === pageNum)) {
+      pageVocabItems.set(item.word.toLowerCase(), {
+        word: item.word,
+        id: item.id,
+        lookups: item.lookups
+      });
+    }
+  });
+  
+  // Highlight each word on this page
+  pageVocabItems.forEach(target => {
+    highlightWordInContainer(textLayerContainer, target.word, target.id, target.lookups);
+  });
+}
+
+function highlightWordInContainer(container, word, vocabId, lookups) {
+  if (!word) return;
+  const escapedWord = word.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+  const regex = new RegExp(`(?<![a-zA-Z0-9])${escapedWord}(?![a-zA-Z0-9])`, 'gi');
+
+  const textNodes = [];
+  function findTextNodes(node) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      textNodes.push(node);
+    } else if (node.nodeType === Node.ELEMENT_NODE) {
+      if (node.tagName.toUpperCase() !== 'MARK') {
+        for (let i = 0; i < node.childNodes.length; i++) {
+          findTextNodes(node.childNodes[i]);
+        }
+      }
+    }
+  }
+  findTextNodes(container);
+
+  for (const node of textNodes) {
+    const content = node.textContent;
+    let match;
+    const matches = [];
+    regex.lastIndex = 0;
+    while ((match = regex.exec(content)) !== null) {
+      matches.push({
+        index: match.index,
+        text: match[0]
+      });
+    }
+
+    for (let i = matches.length - 1; i >= 0; i--) {
+      const m = matches[i];
+      try {
+        const textNodeToHighlight = node.splitText(m.index);
+        textNodeToHighlight.splitText(m.text.length);
+
+        const mark = document.createElement('mark');
+        mark.className = `readflow-highlight level-${Math.min(lookups || 1, 3)}`;
+        mark.dataset.vocabId = vocabId;
+        mark.dataset.word = word;
+
+        textNodeToHighlight.parentNode.insertBefore(mark, textNodeToHighlight);
+        mark.appendChild(textNodeToHighlight);
+
+        bindContextMenuToMark(mark, vocabId);
+      } catch (err) {
+        console.warn("Failed splitting text node for word match highlight:", err);
+      }
+    }
+  }
+}
+
+function bindContextMenuToMark(mark, vocabId) {
+  mark.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const vocabItem = vocabList.find(item => item.id === vocabId);
+    if (vocabItem) {
+      const rect = mark.getBoundingClientRect();
+      showHighlightContextMenu(vocabItem, rect);
+    }
+  });
+}
+
+function showHighlightContextMenu(vocabItem, rect) {
+  removeToast();
+
+  const toast = document.createElement('div');
+  toast.className = 'readflow-toast readflow-context-menu';
+  
+  const phoneticHtml = vocabItem.phonetic 
+    ? `<div class="toast-dict-phonetic">${escapeHtml(vocabItem.phonetic)}</div>` 
+    : '';
+
+  toast.innerHTML = `
+    <div class="toast-header">
+      <span class="toast-word" title="${escapeHtml(vocabItem.word)}">${escapeHtml(vocabItem.word)}</span>
+      <div class="toast-actions">
+        <button class="toast-action-btn speak-btn" title="朗读单词">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+            <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+          </svg>
+        </button>
+        <button class="toast-action-btn close-btn" title="关闭">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+    </div>
+    ${phoneticHtml}
+    <div class="toast-translation">${escapeHtml(vocabItem.translation)}</div>
+    <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 8px;">
+      <span class="toast-badge">已记录 (${vocabItem.lookups}次)</span>
+      <span style="font-size: 9px; color: var(--text-muted);">P. ${vocabItem.contexts && vocabItem.contexts.length > 0 ? vocabItem.contexts[0].page : '?'}</span>
+    </div>
+    <div class="context-menu-actions" style="margin-top: 10px; display: flex; gap: 8px; justify-content: flex-end; border-top: 1px solid var(--border); padding-top: 8px;">
+      <button class="menu-action-btn edit-btn" style="display: flex; align-items: center; gap: 4px; padding: 4px 8px; font-size: 11px; background: var(--primary-gradient); color: #fff; border: none; border-radius: 4px; cursor: pointer;">
+        📝 编辑词卡
+      </button>
+      <button class="menu-action-btn delete-btn" style="display: flex; align-items: center; gap: 4px; padding: 4px 8px; font-size: 11px; background: rgba(220,53,69,0.1); color: #dc3545; border: 1px solid rgba(220,53,69,0.2); border-radius: 4px; cursor: pointer;">
+        🗑️ 删除
+      </button>
+    </div>
+  `;
+
+  // Attach handlers
+  toast.querySelector('.speak-btn').addEventListener('click', (e) => {
+    e.stopPropagation();
+    speakWord(vocabItem.word);
+  });
+
+  toast.querySelector('.close-btn').addEventListener('click', (e) => {
+    e.stopPropagation();
+    removeToast();
+  });
+
+  toast.querySelector('.edit-btn').addEventListener('click', (e) => {
+    e.stopPropagation();
+    removeToast();
+    openSidebarAndEditCard(vocabItem.id);
+  });
+
+  toast.querySelector('.delete-btn').addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (confirm(`确定要删除单词 "${vocabItem.word}" 及其所有记录吗？`)) {
+      removeToast();
+      deleteVocabWord(vocabItem.id);
+    }
+  });
+
+  const documentClickHandler = (e) => {
+    if (!toast.contains(e.target)) {
+      removeToast();
+      document.removeEventListener('mousedown', documentClickHandler);
+    }
+  };
+  setTimeout(() => {
+    document.addEventListener('mousedown', documentClickHandler);
+  }, 10);
+
+  positionAndShowToast(toast, rect);
+}
+
+function openSidebarAndEditCard(vocabId) {
+  if (!settings.sidebarOpen) {
+    settings.sidebarOpen = true;
+    chrome.storage.local.set({ settings });
+    updateLayout();
+  }
+  
+  switchTab('vocab');
+  
+  setTimeout(() => {
+    const cards = vocabListContainer.querySelectorAll('.vocab-card');
+    let targetCard = null;
+    cards.forEach(card => {
+      if (card.dataset.vocabId === vocabId) {
+        targetCard = card;
+      }
+    });
+
+    if (targetCard) {
+      targetCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      openCardEditor(vocabId, targetCard);
+    }
+  }, 100);
+}
+
+function openCardEditor(vocabId, cardElement) {
+  const item = vocabList.find(x => x.id === vocabId);
+  if (!item) return;
+
+  const contexts = item.contexts || [];
+  const notes = item.notes || [];
+
+  let sentencesHtml = '';
+  contexts.forEach((ctx, idx) => {
+    sentencesHtml += `
+      <div class="edit-sentence-row" style="margin-bottom: 8px; display: flex; flex-direction: column; gap: 4px;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <span style="font-size: 10px; color: var(--text-muted); font-weight: bold;">例句 ${idx + 1} (第 ${ctx.page} 页)</span>
+          <button type="button" class="edit-del-sentence-btn" data-index="${idx}" style="background: none; border: none; color: #dc3545; font-size: 10px; cursor: pointer;">删除</button>
+        </div>
+        <textarea class="edit-sentence-textarea" data-index="${idx}" style="width: 100%; font-size: 11px; padding: 4px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-card); color: var(--text-main); resize: vertical; min-height: 40px; font-family: inherit;">${escapeHtml(ctx.sentence)}</textarea>
+      </div>
+    `;
+  });
+
+  let notesHtml = '';
+  notes.forEach((note, idx) => {
+    notesHtml += `
+      <div class="edit-note-row" style="margin-bottom: 8px; display: flex; flex-direction: column; gap: 4px;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <span style="font-size: 10px; color: #6366f1; font-weight: bold;">💡 个人注释 ${idx + 1}</span>
+          <button type="button" class="edit-del-note-btn" data-index="${idx}" style="background: none; border: none; color: #dc3545; font-size: 10px; cursor: pointer;">删除</button>
+        </div>
+        <textarea class="edit-note-textarea" data-index="${idx}" style="width: 100%; font-size: 11px; padding: 4px; border: 1px solid rgba(99,102,241,0.3); border-radius: 4px; background: rgba(99,102,241,0.03); color: var(--text-main); resize: vertical; min-height: 40px; font-family: inherit;">${escapeHtml(note.text)}</textarea>
+      </div>
+    `;
+  });
+
+  cardElement.className = 'vocab-card card-editor';
+  cardElement.innerHTML = `
+    <div style="font-weight: bold; font-size: 13px; margin-bottom: 8px; color: var(--primary);">编辑词卡: ${escapeHtml(item.word)}</div>
+    
+    <div style="margin-bottom: 10px;">
+      <label style="display: block; font-size: 10px; color: var(--text-muted); font-weight: bold; margin-bottom: 4px;">翻译结果</label>
+      <input type="text" class="edit-translation-input" value="${escapeHtml(item.translation)}" style="width: 100%; font-size: 12px; padding: 6px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-card); color: var(--text-main); font-weight: 500;" />
+    </div>
+
+    <div style="margin-bottom: 10px;">
+      <label style="display: block; font-size: 10px; color: var(--text-muted); font-weight: bold; margin-bottom: 4px;">关联例句</label>
+      <div class="edit-sentences-container">${sentencesHtml || '<div style="font-size: 11px; color: var(--text-muted); font-style: italic;">无关联例句</div>'}</div>
+    </div>
+
+    <div style="margin-bottom: 12px;">
+      <label style="display: block; font-size: 10px; color: var(--text-muted); font-weight: bold; margin-bottom: 4px;">个人注释</label>
+      <div class="edit-notes-container">${notesHtml}</div>
+      <button type="button" class="add-note-btn" style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 4px; padding: 6px; font-size: 11px; border: 1px dashed rgba(99,102,241,0.5); border-radius: 4px; background: none; color: #6366f1; cursor: pointer; margin-top: 4px; transition: all 0.2s;">
+        + 添加个人注释
+      </button>
+    </div>
+
+    <div class="card-editor-actions" style="display: flex; gap: 8px; justify-content: flex-end; border-top: 1px solid var(--border); padding-top: 8px;">
+      <button type="button" class="cancel-edit-btn" style="padding: 6px 12px; font-size: 11px; border: 1px solid var(--border); border-radius: 4px; background: none; color: var(--text-main); cursor: pointer;">取消</button>
+      <button type="button" class="save-edit-btn" style="padding: 6px 12px; font-size: 11px; border: none; border-radius: 4px; background: var(--primary-gradient); color: #fff; cursor: pointer; font-weight: bold;">保存</button>
+    </div>
+  `;
+
+  cardElement.addEventListener('click', (e) => {
+    e.stopPropagation();
+  });
+
+  cardElement.querySelector('.cancel-edit-btn').addEventListener('click', () => {
+    renderSidebarVocabList();
+  });
+
+  cardElement.querySelector('.add-note-btn').addEventListener('click', () => {
+    const notesContainer = cardElement.querySelector('.edit-notes-container');
+    const newIdx = notesContainer.querySelectorAll('.edit-note-row').length;
+    const newNoteRow = document.createElement('div');
+    newNoteRow.className = 'edit-note-row';
+    newNoteRow.style.cssText = 'margin-bottom: 8px; display: flex; flex-direction: column; gap: 4px;';
+    newNoteRow.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <span style="font-size: 10px; color: #6366f1; font-weight: bold;">💡 新注释</span>
+        <button type="button" class="edit-del-note-btn" data-index="${newIdx}" style="background: none; border: none; color: #dc3545; font-size: 10px; cursor: pointer;">删除</button>
+      </div>
+      <textarea class="edit-note-textarea" data-index="${newIdx}" style="width: 100%; font-size: 11px; padding: 4px; border: 1px solid rgba(99,102,241,0.3); border-radius: 4px; background: rgba(99,102,241,0.03); color: var(--text-main); resize: vertical; min-height: 40px; font-family: inherit;" placeholder="输入你的个人注释..."></textarea>
+    `;
+    notesContainer.appendChild(newNoteRow);
+
+    newNoteRow.querySelector('.edit-del-note-btn').addEventListener('click', () => {
+      newNoteRow.remove();
+      reindexRows(notesContainer, '.edit-note-row', '.edit-del-note-btn', '个人注释');
+    });
+  });
+
+  cardElement.querySelectorAll('.edit-del-sentence-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      btn.closest('.edit-sentence-row').remove();
+    });
+  });
+
+  cardElement.querySelectorAll('.edit-del-note-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      btn.closest('.edit-note-row').remove();
+    });
+  });
+
+  cardElement.querySelector('.save-edit-btn').addEventListener('click', async () => {
+    const translation = cardElement.querySelector('.edit-translation-input').value.trim();
+    if (!translation) {
+      alert('翻译结果不能为空！');
+      return;
+    }
+
+    const updatedContexts = [];
+    const sentenceRows = cardElement.querySelectorAll('.edit-sentence-row');
+    sentenceRows.forEach(row => {
+      const textarea = row.querySelector('.edit-sentence-textarea');
+      const idx = parseInt(textarea.dataset.index);
+      const originalCtx = contexts[idx];
+      if (originalCtx) {
+        updatedContexts.push({
+          ...originalCtx,
+          sentence: textarea.value.trim()
         });
       }
     });
+
+    const updatedNotes = [];
+    const noteRows = cardElement.querySelectorAll('.edit-note-row');
+    noteRows.forEach(row => {
+      const textarea = row.querySelector('.edit-note-textarea');
+      const text = textarea.value.trim();
+      if (text) {
+        updatedNotes.push({
+          text,
+          addedAt: Date.now()
+        });
+      }
+    });
+
+    item.translation = translation;
+    item.contexts = updatedContexts;
+    item.notes = updatedNotes;
+
+    await new Promise((resolve) => {
+      chrome.storage.local.set({ vocabList }, resolve);
+    });
+
+    renderSidebarVocabList();
   });
-  
-  // Sort descending by charOffset (right-to-left splits to avoid offset invalidation)
-  highlightTargets.sort((a, b) => b.charOffset - a.charOffset);
-  
-  highlightTargets.forEach(target => {
-    applyRangeHighlight(textLayerContainer, target.charOffset, target.length, target.lookups, target.vocabId);
+}
+
+function reindexRows(container, rowSelector, btnSelector, labelPrefix) {
+  const rows = container.querySelectorAll(rowSelector);
+  rows.forEach((row, newIdx) => {
+    const label = row.querySelector('span');
+    if (label) label.textContent = `💡 ${labelPrefix} ${newIdx + 1}`;
+    const btn = row.querySelector(btnSelector);
+    if (btn) btn.dataset.index = newIdx;
+    const textarea = row.querySelector('textarea');
+    if (textarea) textarea.dataset.index = newIdx;
   });
 }
 
@@ -1879,6 +2225,7 @@ function applyRangeHighlight(container, charOffset, length, lookups, vocabId) {
 
         textNodeToHighlight.parentNode.insertBefore(mark, textNodeToHighlight);
         mark.appendChild(textNodeToHighlight);
+        bindContextMenuToMark(mark, vocabId);
       } catch (err) {
         console.warn("Failed splitting text node for highlight range:", err);
       }
@@ -1912,10 +2259,6 @@ function showToastResult(vocabItem, selectionRect) {
     ? `<div class="toast-dict-phonetic">${escapeHtml(vocabItem.phonetic)}</div>` 
     : '';
 
-  const latestPage = vocabItem.contexts && vocabItem.contexts.length > 0 
-    ? vocabItem.contexts[vocabItem.contexts.length - 1].page 
-    : (vocabItem.page || 1);
-
   toast.innerHTML = `
     <div class="toast-header">
       <span class="toast-word" title="${escapeHtml(vocabItem.word)}">${escapeHtml(vocabItem.word)}</span>
@@ -1936,10 +2279,9 @@ function showToastResult(vocabItem, selectionRect) {
     </div>
     ${phoneticHtml}
     <div class="toast-translation">${escapeHtml(vocabItem.translation)}</div>
-    <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 6px;">
+    <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 4px;">
       <span class="toast-badge">已记录 (${vocabItem.lookups}次)</span>
-      <button class="toast-edit-link" style="background: none; border: none; padding: 0; font-size: 9px; cursor: pointer; color: var(--primary); font-weight: 600; text-decoration: underline; font-family: var(--font-body);">编辑词卡</button>
-      <span style="font-size: 9px; color: var(--text-muted);">P. ${latestPage}</span>
+      <span style="font-size: 9px; color: var(--text-muted);">P. ${vocabItem.page}</span>
     </div>
   `;
 
@@ -1951,12 +2293,6 @@ function showToastResult(vocabItem, selectionRect) {
   toast.querySelector('.close-btn').addEventListener('click', (e) => {
     e.stopPropagation();
     removeToast();
-  });
-
-  toast.querySelector('.toast-edit-link').addEventListener('click', (e) => {
-    e.stopPropagation();
-    removeToast();
-    editVocabCardById(vocabItem.id);
   });
 
   toast.addEventListener('mouseenter', () => {
@@ -2100,10 +2436,6 @@ function renderSidebarVocabList() {
     card.dataset.vocabId = item.id;
     const contexts = item.contexts || [];
 
-    const notesHtml = item.notes 
-      ? `<div class="card-notes">${escapeHtml(item.notes)}</div>` 
-      : '';
-
     let innerContent = `
       <div class="card-top">
         <div class="card-word-title">
@@ -2135,7 +2467,6 @@ function renderSidebarVocabList() {
         </div>
       </div>
       <div class="card-translation">${escapeHtml(item.translation)}</div>
-      ${notesHtml}
     `;
 
     // Multi-sentence contexts (v3.0)
@@ -2174,6 +2505,21 @@ function renderSidebarVocabList() {
       innerContent += contextsHtml;
     }
 
+    // Notes rendering (v3.1)
+    if (cardMode !== 'minimal' && item.notes && item.notes.length > 0) {
+      let notesHtml = '<div class="card-notes" style="margin-top: 6px; display: flex; flex-direction: column; gap: 4px;">';
+      item.notes.forEach(note => {
+        notesHtml += `
+          <div class="card-note-item">
+            <span class="note-bullet" style="color: #6366f1;">💡</span>
+            <span class="note-text" style="flex-grow: 1;">${escapeHtml(note.text)}</span>
+          </div>
+        `;
+      });
+      notesHtml += '</div>';
+      innerContent += notesHtml;
+    }
+
     if (cardMode === 'full') {
       const pages = [...new Set(contexts.map(c => c.page))].sort((a, b) => a - b);
       innerContent += `
@@ -2192,161 +2538,50 @@ function renderSidebarVocabList() {
 
     card.innerHTML = innerContent;
 
-    bindCardStaticListeners(item.id, card);
-
-    // Single click enters edit mode
-    card.addEventListener('click', (e) => {
-      if (e.target.closest('.card-btn') || e.target.closest('.context-expand-btn') || card.classList.contains('editing')) {
-        return;
-      }
-      enterCardEditMode(item.id, card);
+    card.querySelector('.speak-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      speakWord(item.word);
     });
 
-    card.addEventListener('dblclick', (e) => {
-      if (card.classList.contains('editing')) return;
+    card.querySelector('.jump-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      jumpToWordLocation(item);
+    });
+
+    card.querySelector('.delete-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      deleteVocabWord(item.id);
+    });
+
+    // Expand/collapse button for extra contexts
+    const expandBtn = card.querySelector('.context-expand-btn');
+    if (expandBtn) {
+      expandBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const hidden = card.querySelector('.context-hidden');
+        const isCollapsed = expandBtn.dataset.collapsed === 'true';
+        if (hidden) {
+          hidden.style.display = isCollapsed ? 'block' : 'none';
+        }
+        expandBtn.dataset.collapsed = isCollapsed ? 'false' : 'true';
+        expandBtn.textContent = isCollapsed ? '收起' : `展开更多 (${contexts.length - 3}条)`;
+      });
+    }
+
+    card.addEventListener('click', (e) => {
+      // If the click is on an interactive element, don't trigger editor
+      if (e.target.closest('.card-btn') || e.target.closest('.context-expand-btn') || card.classList.contains('card-editor')) {
+        return;
+      }
+      openCardEditor(item.id, card);
+    });
+
+    card.addEventListener('dblclick', () => {
       jumpToWordLocation(item);
     });
 
     vocabListContainer.appendChild(card);
   });
-}
-
-function bindCardStaticListeners(id, cardEl) {
-  const item = vocabList.find(i => i.id === id);
-  if (!item) return;
-
-  const speakBtn = cardEl.querySelector('.speak-btn');
-  if (speakBtn) {
-    speakBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      speakWord(item.word);
-    });
-  }
-
-  const jumpBtn = cardEl.querySelector('.jump-btn');
-  if (jumpBtn) {
-    jumpBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      jumpToWordLocation(item);
-    });
-  }
-
-  const deleteBtn = cardEl.querySelector('.delete-btn');
-  if (deleteBtn) {
-    deleteBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      deleteVocabWord(item.id);
-    });
-  }
-
-  const expandBtn = cardEl.querySelector('.context-expand-btn');
-  if (expandBtn) {
-    expandBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const hidden = cardEl.querySelector('.context-hidden');
-      const isCollapsed = expandBtn.dataset.collapsed === 'true';
-      if (hidden) {
-        hidden.style.display = isCollapsed ? 'block' : 'none';
-      }
-      expandBtn.dataset.collapsed = isCollapsed ? 'false' : 'true';
-      expandBtn.textContent = isCollapsed ? '收起' : `展开更多 (${item.contexts.length - 3}条)`;
-    });
-  }
-}
-
-function enterCardEditMode(id, cardEl) {
-  const item = vocabList.find(i => i.id === id);
-  if (!item) return;
-
-  cardEl.classList.add('editing');
-  
-  // Store original HTML to restore on cancel
-  const originalHtml = cardEl.innerHTML;
-
-  let contextsHtml = '';
-  const contexts = item.contexts || [];
-  contexts.forEach((ctx, index) => {
-    contextsHtml += `
-      <div style="margin-bottom: 8px;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
-          <span class="context-page-badge">P.${ctx.page}</span>
-          <span style="font-size: 9px; color: var(--text-muted);">例句 ${index + 1}</span>
-        </div>
-        <textarea class="edit-context-input" data-index="${index}" style="width: 100%; font-size: 11px; font-family: var(--font-body); border: 1px solid var(--border); border-radius: 6px; padding: 6px; box-sizing: border-box; resize: vertical; background: var(--bg-card); color: var(--text-main);">${escapeHtml(ctx.sentence)}</textarea>
-      </div>
-    `;
-  });
-
-  cardEl.innerHTML = `
-    <div class="card-top">
-      <div class="card-word-title">
-        <span>编辑: ${escapeHtml(item.word)}</span>
-      </div>
-    </div>
-    <div style="margin-top: 8px;">
-      ${contextsHtml}
-    </div>
-    <div style="margin-top: 8px;">
-      <label style="font-size: 10px; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 2px;">笔记/注释</label>
-      <textarea class="edit-notes-input" placeholder="输入您的注释/笔记..." style="width: 100%; font-size: 11px; font-family: var(--font-body); border: 1px solid var(--border); border-radius: 6px; padding: 6px; box-sizing: border-box; height: 60px; resize: vertical; background: var(--bg-card); color: var(--text-main);">${escapeHtml(item.notes || '')}</textarea>
-    </div>
-    <div class="edit-actions" style="display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px;">
-      <button class="edit-cancel-btn" style="font-size: 10px; padding: 4px 10px; border: 1px solid var(--border); border-radius: 6px; background: none; cursor: pointer; color: var(--text-muted); font-family: var(--font-body); font-weight: 500;">取消</button>
-      <button class="edit-save-btn" style="font-size: 10px; padding: 4px 10px; border: 1px solid var(--primary); border-radius: 6px; background: var(--primary); color: white; cursor: pointer; font-family: var(--font-body); font-weight: 600;">保存</button>
-    </div>
-  `;
-
-  cardEl.querySelector('.edit-cancel-btn').addEventListener('click', (e) => {
-    e.stopPropagation();
-    cardEl.innerHTML = originalHtml;
-    cardEl.classList.remove('editing');
-    bindCardStaticListeners(id, cardEl);
-  });
-
-  cardEl.querySelector('.edit-save-btn').addEventListener('click', async (e) => {
-    e.stopPropagation();
-    
-    // Save contexts
-    const contextTextareas = cardEl.querySelectorAll('.edit-context-input');
-    contextTextareas.forEach(textarea => {
-      const idx = parseInt(textarea.dataset.index);
-      if (item.contexts && item.contexts[idx]) {
-        item.contexts[idx].sentence = textarea.value.trim();
-      }
-    });
-
-    // Save notes
-    const notesTextarea = cardEl.querySelector('.edit-notes-input');
-    item.notes = notesTextarea.value.trim();
-
-    // Save database
-    await new Promise((resolve) => {
-      chrome.storage.local.set({ vocabList }, resolve);
-    });
-
-    cardEl.classList.remove('editing');
-    renderSidebarVocabList();
-  });
-}
-
-function editVocabCardById(id) {
-  // Open sidebar if closed
-  if (!settings.sidebarOpen) {
-    settings.sidebarOpen = !settings.sidebarOpen;
-    chrome.storage.local.set({ settings });
-    updateLayout();
-  }
-  // Switch to vocab tab
-  switchTab('vocab');
-  
-  // Find card element and enter edit mode
-  setTimeout(() => {
-    const cardEl = document.querySelector(`.vocab-card[data-vocab-id="${id}"]`);
-    if (cardEl) {
-      cardEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      enterCardEditMode(id, cardEl);
-    }
-  }, 150);
 }
 
 function jumpToWordLocation(item) {
