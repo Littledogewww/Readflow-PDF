@@ -1,5 +1,18 @@
 // extension_glue.js
 
+// Immediate URL cleanup to prevent PDF.js from loading expired blob URLs on page refresh
+(function() {
+  try {
+    const url = new URL(window.location.href);
+    if (url.searchParams.has('bookId') && url.searchParams.has('file')) {
+      url.searchParams.delete('file');
+      window.history.replaceState({}, '', url.toString());
+    }
+  } catch (e) {
+    console.warn('[ReadFlow] URL cleanup failed:', e);
+  }
+})();
+
 // --- Global State ---
 let vocabList = [];
 let settings = {
@@ -103,8 +116,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       clearInterval(checkInterval);
       
       // Hook native resize/sidebar toggle changes to update our layouts
-      window.PDFViewerApplication.eventBus.on('resize', () => {
-        updateLayout();
+      window.addEventListener('resize', (e) => {
+        if (e.isTrusted) {
+          updateLayout();
+        }
       });
       window.PDFViewerApplication.eventBus.on('sidebarviewchanged', () => {
         setTimeout(updateLayout, 50);
