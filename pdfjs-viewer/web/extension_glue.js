@@ -176,7 +176,7 @@ async function loadExtensionData() {
   return new Promise((resolve) => {
     chrome.storage.local.get(['vocabList', 'settings'], (result) => {
       if (result.vocabList) {
-        vocabList = result.vocabList;
+        vocabList = migrateVocabData(result.vocabList);
       }
       if (result.settings) {
         settings = { ...settings, ...result.settings };
@@ -184,6 +184,72 @@ async function loadExtensionData() {
       resolve();
     });
   });
+}
+
+/**
+ * v3.0 Data Migration: Convert old flat vocab entries to word-centric format.
+ * Old format: each entry has `context` (string), `page`, `charOffset`, `length`
+ * New format: each entry has `contexts` (array of { sentence, page, charOffset, length, addedAt })
+ * Entries with same word + source_pdf are merged into one.
+ */
+function migrateVocabData(rawList) {
+  if (!rawList || rawList.length === 0) return rawList;
+
+  // Check if already migrated: look for `contexts` array on first item
+  if (rawList[0].contexts && Array.isArray(rawList[0].contexts)) {
+    return rawList; // Already in v3 format
+  }
+
+  // Check if it's old format: has `context` string but no `contexts` array
+  const needsMigration = rawList.some(item => typeof item.context === 'string' && !item.contexts);
+  if (!needsMigration) return rawList;
+
+  console.log('[ReadFlow] Migrating vocab data from v2 to v3 format...');
+
+  // Group by {source_pdf}__{word.toLowerCase()}
+  const groups = new Map();
+  for (const item of rawList) {
+    const key = `${item.source_pdf}__${item.word.toLowerCase()}`;
+    if (!groups.has(key)) {
+      groups.set(key, {
+        id: key,
+        word: item.word,
+        translation: item.translation,
+        phonetic: item.phonetic || '',
+        source_pdf: item.source_pdf,
+        lookups: item.lookups || 1,
+        timestamp: item.timestamp || Date.now(),
+        contexts: []
+      });
+    }
+    const group = groups.get(key);
+    // Take the most recent translation and highest lookups
+    if (item.timestamp > group.timestamp) {
+      group.timestamp = item.timestamp;
+      group.translation = item.translation;
+    }
+    if ((item.lookups || 1) > group.lookups) {
+      group.lookups = item.lookups;
+    }
+    // Add context as a sentence entry (deduplicate by sentence text)
+    const sentence = (item.context || '').trim();
+    if (sentence && !group.contexts.some(c => c.sentence === sentence)) {
+      group.contexts.push({
+        sentence,
+        page: item.page,
+        charOffset: item.charOffset || 0,
+        length: item.length || item.word.length,
+        addedAt: item.timestamp || Date.now()
+      });
+    }
+  }
+
+  const migrated = Array.from(groups.values());
+  console.log(`[ReadFlow] Migration complete: ${rawList.length} entries → ${migrated.length} word cards`);
+
+  // Persist migrated data
+  chrome.storage.local.set({ vocabList: migrated });
+  return migrated;
 }
 
 function updateBadgeCount() {
@@ -1279,31 +1345,171 @@ function getPageTextAndOffset(textLayerEl, range) {
   return { text: reconstructedText, offset: charOffset };
 }
 
+// --- v3.0: Smart Sentence Segmentation Engine ---
+// Abbreviation whitelist — periods after these tokens do NOT end a sentence
+const ABBREVIATIONS = new Set([
+  // Titles
+  'mr', 'mrs', 'ms', 'dr', 'prof', 'jr', 'sr', 'rev',
+  // Corporate
+  'inc', 'ltd', 'corp', 'co', 'llc',
+  // Latin / common
+  'etc', 'vs', 'approx', 'dept', 'est', 'al', 'cf', 'ref',
+  // Academic / scientific
+  'fig', 'figs', 'eq', 'eqs', 'tab', 'sec', 'ch', 'pp', 'ed', 'trans', 'ibid',
+  'vol', 'no', 'rev', 'op', 'cit', 'proc', 'int', 'natl',
+  // Units / misc
+  'st', 'ave', 'blvd', 'tel', 'fax', 'min', 'max', 'avg',
+]);
+
+// Multi-char abbreviations where both parts matter (handled as bigrams)
+const MULTI_ABBREVS = ['e.g', 'i.e', 'et al', 'Ph.D', 'M.D', 'B.A', 'M.A', 'U.S', 'U.K'];
+
+/**
+ * segmentSentences(text)
+ * Splits text into sentences with offset tracking.
+ * Returns: Array<{ sentence: string, start: number, end: number }>
+ */
+function segmentSentences(text) {
+  if (!text || text.length === 0) return [];
+
+  const sentences = [];
+  let sentenceStart = 0;
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+
+    // Always split on ? and !
+    if (ch === '?' || ch === '!') {
+      const sentEnd = i + 1;
+      const raw = text.slice(sentenceStart, sentEnd).trim();
+      if (raw.length > 0) {
+        sentences.push({ sentence: raw, start: sentenceStart, end: sentEnd });
+      }
+      sentenceStart = sentEnd;
+      continue;
+    }
+
+    // Period detection — the main complexity
+    if (ch === '.') {
+      // Check what comes AFTER the period
+      let afterIdx = i + 1;
+      // Skip whitespace after the period
+      while (afterIdx < text.length && (text[afterIdx] === ' ' || text[afterIdx] === '\t')) {
+        afterIdx++;
+      }
+      const charAfter = afterIdx < text.length ? text[afterIdx] : '';
+
+      // Rule 1: Period followed by a digit → NOT a sentence end (e.g. "3.14")
+      if (/\d/.test(charAfter) && i > 0 && /\d/.test(text[i - 1])) {
+        continue;
+      }
+
+      // Rule 2: Check for multi-char abbreviations (e.g., i.e.)
+      let isMultiAbbrev = false;
+      for (const ma of MULTI_ABBREVS) {
+        const dotlessLen = ma.replace(/\./g, '').length + ma.split('.').length - 1;
+        const startCheck = Math.max(0, i - dotlessLen);
+        const slice = text.slice(startCheck, i + 1).toLowerCase();
+        if (slice.endsWith(ma.toLowerCase() + '.') || slice.endsWith(ma.toLowerCase())) {
+          isMultiAbbrev = true;
+          break;
+        }
+      }
+      if (isMultiAbbrev) {
+        continue;
+      }
+
+      // Rule 3: Extract the token before the period
+      let tokenStart = i - 1;
+      while (tokenStart >= sentenceStart && /[a-zA-Z]/.test(text[tokenStart])) {
+        tokenStart--;
+      }
+      tokenStart++;
+      const tokenBefore = text.slice(tokenStart, i).toLowerCase();
+
+      // Rule 4: Single letter followed by period → numbering label (a. b. c.) — NOT a sentence end
+      if (/^[a-z]$/i.test(tokenBefore)) {
+        continue;
+      }
+
+      // Rule 5: Number followed by period → numbering label (1. 2. 3.) — NOT a sentence end
+      let numStart = i - 1;
+      while (numStart >= sentenceStart && /\d/.test(text[numStart])) {
+        numStart--;
+      }
+      numStart++;
+      if (numStart < i && /^\d+$/.test(text.slice(numStart, i))) {
+        // But allow if the number is at the very end of what looks like a sentence
+        // (e.g., "published in 2024." should split if followed by capital)
+        const isEndOfLongText = (i - sentenceStart) > 15;
+        if (!isEndOfLongText || !/[A-Z]/.test(charAfter)) {
+          continue;
+        }
+      }
+
+      // Rule 6: Token is a known abbreviation → NOT a sentence end
+      if (tokenBefore.length > 0 && ABBREVIATIONS.has(tokenBefore)) {
+        continue;
+      }
+
+      // Rule 7: Period NOT followed by uppercase letter or newline/end → NOT a sentence end
+      if (charAfter && !/[A-Z\n\r]/.test(charAfter) && afterIdx < text.length) {
+        continue;
+      }
+
+      // All checks passed — this IS a sentence boundary
+      const sentEnd = i + 1;
+      const raw = text.slice(sentenceStart, sentEnd).trim();
+      if (raw.length > 0) {
+        sentences.push({ sentence: raw, start: sentenceStart, end: sentEnd });
+      }
+      sentenceStart = sentEnd;
+      continue;
+    }
+
+    // Newline handling: if previous text ends with a period, it's already handled.
+    // If newline appears with significant gap (paragraph break), treat as sentence boundary
+    if (ch === '\n' || ch === '\r') {
+      // Look ahead for double-newline (paragraph break)
+      if (i + 1 < text.length && (text[i + 1] === '\n' || text[i + 1] === '\r')) {
+        const raw = text.slice(sentenceStart, i).trim();
+        if (raw.length > 0) {
+          sentences.push({ sentence: raw, start: sentenceStart, end: i });
+        }
+        sentenceStart = i + 1;
+        while (sentenceStart < text.length && /[\n\r\s]/.test(text[sentenceStart])) {
+          sentenceStart++;
+        }
+        i = sentenceStart - 1;
+      }
+    }
+  }
+
+  // Remaining text as final sentence
+  const remaining = text.slice(sentenceStart).trim();
+  if (remaining.length > 0) {
+    sentences.push({ sentence: remaining, start: sentenceStart, end: text.length });
+  }
+
+  return sentences;
+}
+
 function getContextSentence(fullText, startOffset, wordLength) {
-  const sentenceStarts = ['.', '?', '!', '\n', '\r', '。', '？', '！'];
-  
-  let start = startOffset;
-  while (start > 0) {
-    const char = fullText[start - 1];
-    if (sentenceStarts.includes(char)) {
-      break;
+  const sentences = segmentSentences(fullText);
+
+  // Find the sentence that contains the word
+  for (const s of sentences) {
+    // Account for whitespace differences: find effective range
+    const effStart = fullText.indexOf(s.sentence.charAt(0), s.start);
+    if (startOffset >= s.start && startOffset < s.end) {
+      return s.sentence.replace(/\s+/g, ' ').trim();
     }
-    start--;
   }
 
-  let end = startOffset + wordLength;
-  while (end < fullText.length) {
-    const char = fullText[end];
-    if (sentenceStarts.includes(char)) {
-      end++;
-      break;
-    }
-    end++;
-  }
-
-  let sentence = fullText.slice(start, end).trim();
-  sentence = sentence.replace(/\s+/g, ' ');
-  return sentence;
+  // Fallback: return a window around the word (±120 chars)
+  const fallbackStart = Math.max(0, startOffset - 120);
+  const fallbackEnd = Math.min(fullText.length, startOffset + wordLength + 120);
+  return fullText.slice(fallbackStart, fallbackEnd).replace(/\s+/g, ' ').trim();
 }
 
 // --- Translation Engine ---
@@ -1390,43 +1596,58 @@ Respond with ONLY the translation, part of speech, and optional phonetic spellin
   return { translation: data.candidates[0].content.parts[0].text.trim(), phonetic: '' };
 }
 
-// --- Storage Integration ---
+// --- Storage Integration (v3.0 Word-Centric Model) ---
 async function saveVocabWord(wordData) {
-  const vocabId = wordData.currentPdf + '_' + wordData.pageNum + '_' + wordData.charOffset + '_' + wordData.word.toLowerCase();
-  const index = vocabList.findIndex(item => item.id === vocabId);
+  const wordKey = `${wordData.currentPdf}__${wordData.word.toLowerCase()}`;
+  const index = vocabList.findIndex(item => item.id === wordKey);
   const now = Date.now();
+
+  const newContext = {
+    sentence: wordData.context,
+    page: wordData.pageNum,
+    charOffset: wordData.charOffset,
+    length: wordData.length,
+    addedAt: now
+  };
 
   let item;
   if (index !== -1) {
+    // Word already exists in this PDF — merge
     item = vocabList[index];
     item.lookups = (item.lookups || 1) + 1;
     item.timestamp = now;
-  } else {
-    const globalIndex = vocabList.findIndex(item => item.word.toLowerCase() === wordData.word.toLowerCase() && item.source_pdf === wordData.currentPdf);
-    const baseLookups = globalIndex !== -1 ? vocabList[globalIndex].lookups : 0;
+    // Update translation to the latest (context-aware translation may differ)
+    item.translation = wordData.translation;
+    if (wordData.phonetic) item.phonetic = wordData.phonetic;
 
+    // Deduplicate: only add if sentence is meaningfully different
+    const isDuplicate = item.contexts.some(c => {
+      if (c.sentence === newContext.sentence) return true;
+      // Simple similarity: if >85% of words overlap, treat as duplicate
+      const wordsA = new Set(c.sentence.toLowerCase().split(/\s+/));
+      const wordsB = new Set(newContext.sentence.toLowerCase().split(/\s+/));
+      const intersection = [...wordsA].filter(w => wordsB.has(w)).length;
+      const union = new Set([...wordsA, ...wordsB]).size;
+      return union > 0 && (intersection / union) > 0.85;
+    });
+
+    if (!isDuplicate && newContext.sentence.trim().length > 0) {
+      item.contexts.push(newContext);
+    }
+  } else {
+    // New word — create fresh entry
     item = {
-      id: vocabId,
+      id: wordKey,
       word: wordData.word,
       translation: wordData.translation,
-      phonetic: wordData.phonetic,
-      context: wordData.context,
+      phonetic: wordData.phonetic || '',
       source_pdf: wordData.currentPdf,
-      page: wordData.pageNum,
-      charOffset: wordData.charOffset,
-      length: wordData.length,
+      lookups: 1,
       timestamp: now,
-      lookups: baseLookups + 1
+      contexts: newContext.sentence.trim().length > 0 ? [newContext] : []
     };
     vocabList.push(item);
   }
-
-  // Update lookup counts for all instances of the same word in this doc
-  vocabList.forEach(v => {
-    if (v.word.toLowerCase() === item.word.toLowerCase() && v.source_pdf === wordData.currentPdf) {
-      v.lookups = item.lookups;
-    }
-  });
 
   await new Promise((resolve) => {
     chrome.storage.local.set({ vocabList }, resolve);
@@ -1476,7 +1697,7 @@ async function clearEntireDatabase() {
   }
 }
 
-// --- Highlighting Engine ---
+// --- Highlighting Engine (v3.0 Word-Centric) ---
 function applyPageHighlights(pageNum, textLayerContainer) {
   // Clear existing highlights
   const marks = textLayerContainer.querySelectorAll('mark.readflow-highlight');
@@ -1492,13 +1713,29 @@ function applyPageHighlights(pageNum, textLayerContainer) {
   textLayerContainer.normalize();
 
   const currentPdf = getCurrentPdfName();
-  const pageWords = vocabList.filter(item => item.source_pdf === currentPdf && item.page === pageNum);
   
-  // Sort descending by charOffset (right-to-left splits)
-  pageWords.sort((a, b) => b.charOffset - a.charOffset);
+  // Collect all highlight targets for this page from contexts[] arrays
+  const highlightTargets = [];
+  vocabList.forEach(item => {
+    if (item.source_pdf !== currentPdf) return;
+    const contexts = item.contexts || [];
+    contexts.forEach(ctx => {
+      if (ctx.page === pageNum) {
+        highlightTargets.push({
+          charOffset: ctx.charOffset,
+          length: ctx.length,
+          lookups: item.lookups,
+          vocabId: item.id
+        });
+      }
+    });
+  });
   
-  pageWords.forEach(item => {
-    applyRangeHighlight(textLayerContainer, item.charOffset, item.length, item.lookups, item.id);
+  // Sort descending by charOffset (right-to-left splits to avoid offset invalidation)
+  highlightTargets.sort((a, b) => b.charOffset - a.charOffset);
+  
+  highlightTargets.forEach(target => {
+    applyRangeHighlight(textLayerContainer, target.charOffset, target.length, target.lookups, target.vocabId);
   });
 }
 
@@ -1751,7 +1988,7 @@ function renderSidebarVocabList() {
     list = list.filter(item => 
       item.word.toLowerCase().includes(query) || 
       item.translation.toLowerCase().includes(query) || 
-      item.context.toLowerCase().includes(query)
+      (item.contexts || []).some(c => c.sentence.toLowerCase().includes(query))
     );
   }
 
@@ -1780,7 +2017,7 @@ function renderSidebarVocabList() {
   list.forEach(item => {
     const card = document.createElement('div');
     card.className = `vocab-card level-${Math.min(item.lookups || 1, 3)} card-mode-${cardMode}`;
-    const contextHtml = highlightWordInText(item.context, item.word);
+    const contexts = item.contexts || [];
 
     let innerContent = `
       <div class="card-top">
@@ -1815,11 +2052,44 @@ function renderSidebarVocabList() {
       <div class="card-translation">${escapeHtml(item.translation)}</div>
     `;
 
-    if (cardMode !== 'minimal') {
-      innerContent += `<div class="card-context">${contextHtml}</div>`;
+    // Multi-sentence contexts (v3.0)
+    if (cardMode !== 'minimal' && contexts.length > 0) {
+      const maxVisible = 3;
+      const visibleContexts = contexts.slice(0, maxVisible);
+      const hiddenContexts = contexts.slice(maxVisible);
+
+      let contextsHtml = '<div class="card-contexts">';
+      visibleContexts.forEach(ctx => {
+        const highlighted = highlightWordInText(ctx.sentence, item.word);
+        contextsHtml += `
+          <div class="context-item">
+            <span class="context-page-badge">P.${ctx.page}</span>
+            <span class="context-sentence">${highlighted}</span>
+          </div>
+        `;
+      });
+
+      if (hiddenContexts.length > 0) {
+        contextsHtml += `<div class="context-hidden" style="display: none;">`;
+        hiddenContexts.forEach(ctx => {
+          const highlighted = highlightWordInText(ctx.sentence, item.word);
+          contextsHtml += `
+            <div class="context-item">
+              <span class="context-page-badge">P.${ctx.page}</span>
+              <span class="context-sentence">${highlighted}</span>
+            </div>
+          `;
+        });
+        contextsHtml += `</div>`;
+        contextsHtml += `<button class="context-expand-btn" data-collapsed="true">展开更多 (${hiddenContexts.length}条)</button>`;
+      }
+
+      contextsHtml += '</div>';
+      innerContent += contextsHtml;
     }
 
     if (cardMode === 'full') {
+      const pages = [...new Set(contexts.map(c => c.page))].sort((a, b) => a - b);
       innerContent += `
         <div class="card-meta">
           <span class="source-pdf" title="${escapeHtml(item.source_pdf)}">
@@ -1829,7 +2099,7 @@ function renderSidebarVocabList() {
             </svg>
             <span>${escapeHtml(item.source_pdf)}</span>
           </span>
-          <span>第 ${item.page} 页</span>
+          <span>第 ${pages.join(', ')} 页</span>
         </div>
       `;
     }
@@ -1851,6 +2121,21 @@ function renderSidebarVocabList() {
       deleteVocabWord(item.id);
     });
 
+    // Expand/collapse button for extra contexts
+    const expandBtn = card.querySelector('.context-expand-btn');
+    if (expandBtn) {
+      expandBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const hidden = card.querySelector('.context-hidden');
+        const isCollapsed = expandBtn.dataset.collapsed === 'true';
+        if (hidden) {
+          hidden.style.display = isCollapsed ? 'block' : 'none';
+        }
+        expandBtn.dataset.collapsed = isCollapsed ? 'false' : 'true';
+        expandBtn.textContent = isCollapsed ? '收起' : `展开更多 (${contexts.length - 3}条)`;
+      });
+    }
+
     card.addEventListener('dblclick', () => {
       jumpToWordLocation(item);
     });
@@ -1860,34 +2145,42 @@ function renderSidebarVocabList() {
 }
 
 function jumpToWordLocation(item) {
-  // Use PDF.js official Application API to natively jump pages
-  if (window.PDFViewerApplication) {
-    window.PDFViewerApplication.page = item.page;
+  // v3.0: Jump to the most recent context's page
+  if (!window.PDFViewerApplication) return;
+  
+  const contexts = item.contexts || [];
+  if (contexts.length === 0) return;
+  
+  // Jump to the most recently added context
+  const latestCtx = contexts.reduce((latest, ctx) => 
+    (ctx.addedAt || 0) > (latest.addedAt || 0) ? ctx : latest, contexts[0]);
+  
+  window.PDFViewerApplication.page = latestCtx.page;
+  
+  // After page changes and renders, trigger flashing highlights
+  setTimeout(() => {
+    const pageDiv = document.querySelector(`.page[data-page-number="${latestCtx.page}"]`);
+    if (!pageDiv) return;
     
-    // After page changes and renders, trigger flashing highlights
-    setTimeout(() => {
-      const pageDiv = document.querySelector(`.page[data-page-number="${item.page}"]`);
-      if (!pageDiv) return;
-      
-      const mark = pageDiv.querySelector(`mark[data-vocab-id="${item.id}"]`);
-      if (mark) {
-        mark.classList.add('highlight-flash');
-        setTimeout(() => {
-          mark.classList.remove('highlight-flash');
-        }, 1000);
-      }
-    }, 500);
-  }
+    const mark = pageDiv.querySelector(`mark[data-vocab-id="${item.id}"]`);
+    if (mark) {
+      mark.classList.add('highlight-flash');
+      setTimeout(() => {
+        mark.classList.remove('highlight-flash');
+      }, 1000);
+    }
+  }, 500);
 }
 
 function highlightWordInText(text, word) {
-  if (!text || !word) return text;
+  if (!text || !word) return escapeHtml(text || '');
+  const escaped = escapeHtml(text);
   const escapedWord = word.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
   const regex = new RegExp(`(${escapedWord})`, 'gi');
-  return text.replace(regex, '<mark>$1</mark>');
+  return escaped.replace(regex, '<mark>$1</mark>');
 }
 
-// --- CSV and Anki Card Exports ---
+// --- CSV and Anki Card Exports (v3.0 Word-Centric) ---
 function exportVocabCsv() {
   let list = vocabList;
   const currentPdf = getCurrentPdfName();
@@ -1901,22 +2194,27 @@ function exportVocabCsv() {
   }
 
   const csvRows = [
-    ['Word', 'Translation', 'Context', 'Source PDF', 'Page', 'Timestamp']
+    ['Word', 'Translation', 'Lookups', 'Sentences', 'Pages', 'Source PDF', 'Last Queried']
   ];
 
   list.forEach(item => {
+    const contexts = item.contexts || [];
+    const sentences = contexts.map(c => c.sentence).join('\n');
+    const pages = [...new Set(contexts.map(c => c.page))].sort((a, b) => a - b).join(', ');
+    
     csvRows.push([
       item.word,
       item.translation,
-      item.context,
+      (item.lookups || 1).toString(),
+      sentences,
+      pages,
       item.source_pdf,
-      item.page.toString(),
       new Date(item.timestamp).toLocaleString()
     ]);
   });
 
   const csvContent = "data:text/csv;charset=utf-8,\ufeff" 
-    + csvRows.map(e => e.map(val => `"${val.replace(/"/g, '""')}"`).join(",")).join("\n");
+    + csvRows.map(e => e.map(val => `"${(val || '').replace(/"/g, '""')}"`).join(",")).join("\n");
   
   const encodedUri = encodeURI(csvContent);
   const link = document.createElement("a");
@@ -1944,11 +2242,20 @@ function exportVocabAnki() {
     const word = item.word;
     const phonetic = item.phonetic ? `[${item.phonetic}] ` : '';
     const translation = item.translation.replace(/\n/g, '<br>');
-    const boldWordInContext = item.context.replace(new RegExp(`(${word.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')})`, 'gi'), '<b>$1</b>');
-    const context = boldWordInContext.replace(/\n/g, '<br>');
-    const source = `${item.source_pdf} (P.${item.page})`;
+    const contexts = item.contexts || [];
+    
+    // Build context HTML with all sentences, each with page number
+    const contextHtml = contexts.map(ctx => {
+      const boldWord = ctx.sentence.replace(
+        new RegExp(`(${word.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')})`, 'gi'), 
+        '<b>$1</b>'
+      );
+      return `<small>P.${ctx.page}: ${boldWord}</small>`;
+    }).join('<br>');
 
-    const backContent = `${phonetic}<strong>${translation}</strong><br><br><small>Context: ${context}</small><br><br><small style="color:#888;">Source: ${source}</small>`;
+    const source = `${item.source_pdf}`;
+
+    const backContent = `${phonetic}<strong>${translation}</strong><br><br>${contextHtml}<br><br><small style="color:#888;">Source: ${source} | ${item.lookups || 1}x lookups</small>`;
     fileContent += `${word}\t${backContent}\n`;
   });
 
