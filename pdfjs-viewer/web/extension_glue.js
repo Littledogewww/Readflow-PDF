@@ -1228,10 +1228,13 @@ async function handleTextSelection(e) {
   }
 
   const selectedText = selection.toString();
-  const word = selectedText.trim();
-  if (word.length > 80 || /^[0-9\s.,\/#!$%\^&\*;:{}=\-_`~()]+$/.test(word)) {
+  const rawWord = selectedText.trim();
+  if (rawWord.length > 80 || /^[0-9\s.,\/#!$%\^&\*;:{}=\-_`~()]+$/.test(rawWord)) {
     return;
   }
+
+  const word = cleanWord(rawWord);
+  if (!word || word.length === 0) return;
 
   const range = selection.getRangeAt(0);
   const textLayerEl = range.startContainer.parentElement.closest('.textLayer');
@@ -1245,10 +1248,10 @@ async function handleTextSelection(e) {
   const { text: fullPageText, offset: charOffset } = getPageTextAndOffset(textLayerEl, range);
   
   // Find trimmed word offsets inside selection text to ignore spacing padding
-  const leadingSpaceLength = selectedText.indexOf(word);
+  const leadingSpaceLength = selectedText.indexOf(rawWord);
   const finalCharOffset = charOffset + leadingSpaceLength;
 
-  const context = getContextSentence(fullPageText, finalCharOffset, word.length);
+  const context = getContextSentence(fullPageText, finalCharOffset, rawWord.length);
   const rect = range.getBoundingClientRect();
 
   // Clear selections
@@ -1268,7 +1271,7 @@ async function handleTextSelection(e) {
       context,
       pageNum,
       charOffset: finalCharOffset,
-      length: word.length,
+      length: rawWord.length,
       currentPdf
     });
 
@@ -1346,6 +1349,41 @@ function getPageTextAndOffset(textLayerEl, range) {
 }
 
 // --- v3.0: Smart Sentence Segmentation Engine ---
+function cleanSentence(text) {
+  if (!text) return '';
+  
+  // 1. Join hyphenated words at line breaks
+  // E.g. "antibiot-\nics1" -> "antibiotics1", "chal-\nlenging" -> "challenging"
+  text = text.replace(/([a-zA-Z]+)-\s*[\r\n\s]+\s*([a-zA-Z0-9]+)/g, '$1$2');
+  
+  // 2. Match standalone numbers/ranges right before a punctuation (en-dash and normal hyphen)
+  // E.g., "sensitivity 5–7\n." -> "sensitivity\n."
+  text = text.replace(/\s+\d+(?:[\s,–-]+\d+)*(?=\s*[,.?;:!])/g, '');
+  
+  // 3. Match numbers/ranges attached to the end of a word
+  // E.g., "developed3,4" -> "developed", "morbidity8–10" -> "morbidity", "resistance11" -> "resistance"
+  text = text.replace(/(?<=[a-zA-Z])\d+(?:[\s,–-]+\d+)*(?=\s*[,.?;:!]|\s|$)/g, '');
+  
+  // 4. Replace remaining newlines with spaces and collapse whitespace
+  text = text.replace(/[\r\n]+/g, ' ');
+  text = text.replace(/\s+/g, ' ');
+  
+  // 5. Remove space before punctuation marks (often left after replacements or text extraction)
+  text = text.replace(/\s+(?=[,.?;:!])/g, '');
+  
+  return text.trim();
+}
+
+function cleanWord(w) {
+  if (!w) return '';
+  // Join hyphens at line breaks/spaces inside the word
+  w = w.replace(/([a-zA-Z]+)-\s*[\r\n\s]+\s*([a-zA-Z0-9]+)/g, '$1$2');
+  // Replace other newlines/spaces with a single space
+  w = w.replace(/[\r\n\s]+/g, ' ');
+  // Strip trailing citation numbers
+  w = w.replace(/(?<=[a-zA-Z])\d+(?:[\s,–-]+\d+)*(?=\s*[,.?;:!]|\s|$)/g, '');
+  return w.trim();
+}
 // Abbreviation whitelist — periods after these tokens do NOT end a sentence
 const ABBREVIATIONS = new Set([
   // Titles
@@ -1499,17 +1537,15 @@ function getContextSentence(fullText, startOffset, wordLength) {
 
   // Find the sentence that contains the word
   for (const s of sentences) {
-    // Account for whitespace differences: find effective range
-    const effStart = fullText.indexOf(s.sentence.charAt(0), s.start);
     if (startOffset >= s.start && startOffset < s.end) {
-      return s.sentence.replace(/\s+/g, ' ').trim();
+      return cleanSentence(s.sentence);
     }
   }
 
   // Fallback: return a window around the word (±120 chars)
   const fallbackStart = Math.max(0, startOffset - 120);
   const fallbackEnd = Math.min(fullText.length, startOffset + wordLength + 120);
-  return fullText.slice(fallbackStart, fallbackEnd).replace(/\s+/g, ' ').trim();
+  return cleanSentence(fullText.slice(fallbackStart, fallbackEnd));
 }
 
 // --- Translation Engine ---

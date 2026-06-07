@@ -602,6 +602,7 @@
   position: relative;
   overflow: hidden;
   box-shadow: var(--shadow-sm);
+  flex-shrink: 0;
 }
 
 .vocab-card:hover {
